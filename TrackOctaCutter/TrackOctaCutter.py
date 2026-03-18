@@ -1114,7 +1114,7 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     + tiny rise into channel; invisible from viewer-facing and wall-facing sides.
     """
     PIN_DEPTH  = 1.0    # 10 mm engagement per side (20 mm total key length)
-    HOLE_CL    = 0.04   # 0.4 mm clearance on each face of socket
+    HOLE_CL    = 0.02   # 0.2 mm clearance on each face of socket (tighter fit)
     PIN_EXTRA  = 0.05   # extra socket depth so key never bottoms out
 
     wt       = params['WALL_THICKNESS']
@@ -1127,6 +1127,13 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     EAR_BOT      = wt * 0.70           # depth to arm bottom (≈2.10 mm)
     FLOOR_DIP    = wt                  # stem flush with outer floor face
     CHANNEL_RISE = 0.05                # 0.5 mm above inner floor (hidden in channel)
+
+    # ── Collar boss dimensions (sits on inner floor face, into channel) ───────
+    # Acts as assembly stop + covers junction gap.  Protrudes into channel
+    # (wall-hidden side) so invisible when track is mounted.
+    COLLAR_HW  = inner_hw - 0.03      # slightly narrower than inner channel
+    COLLAR_H   = 0.15                 # 1.5 mm tall above inner floor face
+    COLLAR_LEN = 0.40                 # 4 mm total (±2 mm each side of junction)
 
     # ── Orientation ──────────────────────────────────────────────────────────
     detect_sk = root.sketches.add(cut_plane)
@@ -1257,10 +1264,14 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                 ui.messageBox(f'Socket cut failed (jct {joint_num}, body {body.name}):\n'
                               f'{e}\n{traceback.format_exc()}')
 
-    # ── H-key body — created ONCE, shared across all junctions ───────────────
-    # Check root bodies for existing Connector_Key.
+    # ── H-key body + collar — created ONCE, shared across all junctions ────────
+    # Connector_Key: 10-vertex cross body (20 mm total, symmetric PIN_DEPTH each side).
+    # Collar: rectangular boss centred at junction, sits on inner floor face,
+    # protrudes COLLAR_H into channel (wall-hidden side).  Acts as assembly stop
+    # and covers the junction gap.  Both combined into a single Connector_Key body.
     key_exists = any(b.name == 'Connector_Key' for b in root.bRepBodies)
     if not key_exists:
+        key_body = None
         try:
             _, key_prof = _key_profile(
                 f'ConnectorKey_{joint_num}',
@@ -1277,11 +1288,76 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                 )
                 feat = extrudes.add(ei)
                 if feat.bodies.count > 0:
-                    feat.bodies.item(0).name = 'Connector_Key'
+                    key_body = feat.bodies.item(0)
+                    key_body.name = 'Connector_Key'
         except Exception as e:
             if ui:
                 ui.messageBox(f'Connector_Key creation failed (jct {joint_num}):\n'
                               f'{e}\n{traceback.format_exc()}')
+
+        # ── Collar boss ───────────────────────────────────────────────────────
+        # Rectangular slab at junction centre: COLLAR_HW*2 wide, COLLAR_LEN long,
+        # COLLAR_H tall above inner floor face (into channel).
+        if key_body is not None:
+            try:
+                collar_sk = root.sketches.add(cut_plane)
+                collar_sk.name = f'Collar_{joint_num}'
+                collar_inv = collar_sk.transform.copy()
+                collar_inv.invert()
+
+                fp_c = floor_w.copy()
+                fp_c.transformBy(collar_inv)
+                fx_c, fy_c = fp_c.x, fp_c.y
+
+                # Inward direction in collar_sk (into channel)
+                _ch_c = adsk.core.Point3D.create(
+                    floor_w.x + 0.5 * _iyw.x,
+                    floor_w.y + 0.5 * _iyw.y,
+                    floor_w.z + 0.5 * _iyw.z,
+                )
+                _ch_c.transformBy(collar_inv)
+                inward_c = 1.0 if (_ch_c.y - fy_c) >= 0.0 else -1.0
+
+                # Rectangle: full width across channel, COLLAR_H into channel
+                coll_pts = [
+                    (-COLLAR_HW, fy_c),
+                    ( COLLAR_HW, fy_c),
+                    ( COLLAR_HW, fy_c + inward_c * COLLAR_H),
+                    (-COLLAR_HW, fy_c + inward_c * COLLAR_H),
+                ]
+                sk_lines = collar_sk.sketchCurves.sketchLines
+                for i in range(4):
+                    a, b_pt = coll_pts[i], coll_pts[(i + 1) % 4]
+                    sk_lines.addByTwoPoints(
+                        adsk.core.Point3D.create(a[0],    a[1],    0),
+                        adsk.core.Point3D.create(b_pt[0], b_pt[1], 0),
+                    )
+
+                if collar_sk.profiles.count > 0:
+                    collar_prof = collar_sk.profiles.item(0)
+                    ei = extrudes.createInput(
+                        collar_prof,
+                        adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
+                    )
+                    ei.setSymmetricExtent(
+                        adsk.core.ValueInput.createByReal(COLLAR_LEN / 2.0), True
+                    )
+                    collar_feat = extrudes.add(ei)
+                    if collar_feat.bodies.count > 0:
+                        collar_body = collar_feat.bodies.item(0)
+                        # Join collar to key (both in root — no cross-component issue)
+                        tc = adsk.core.ObjectCollection.create()
+                        tc.add(collar_body)
+                        ji = root.features.combineFeatures.createInput(key_body, tc)
+                        ji.operation        = adsk.fusion.FeatureOperations.JoinFeatureOperation
+                        ji.isKeepToolBodies = False
+                        root.features.combineFeatures.add(ji)
+
+                collar_sk.isLightBulbOn = False
+            except Exception as e:
+                if ui:
+                    ui.messageBox(f'Collar creation failed (jct {joint_num}):\n'
+                                  f'{e}\n{traceback.format_exc()}')
 
     return success
 
