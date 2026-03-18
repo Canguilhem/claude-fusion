@@ -134,8 +134,10 @@ def show_help(ui, params):
         '  3. All CutPlane_* planes are processed:\n'
         '     - Body split at each plane\n'
         '     - Clip_N bridge plate created at each junction\n'
-        '  Assembly: plate inside channel at floor level;\n'
-        '  2\u00d7 M2 screws from channel side thread into heat-set floor inserts.\n\n'
+        '  Assembly:\n'
+        '   M2 plate: plate inside channel, 2\u00d7 M2 screws from channel side.\n'
+        '   H-key: identical sockets in both pieces, shared Connector_Key body.\n'
+        '     Slide key into piece A, push piece B onto protruding half.\n\n'
         '--- Current Parameters ---\n'
         f'TRACK_HEIGHT:   {params["TRACK_HEIGHT"]*10:.1f} mm\n'
         f'TRACK_WIDTH:    {params["TRACK_WIDTH"]*10:.1f} mm\n'
@@ -296,10 +298,10 @@ def cut_at_planes(root, ui, design, params):
         f'         Flat plate inside channel + 2\u00d7 M2 screws\n'
         f'         Requires: heat-set inserts + M2 screws\n'
         f'         Fully hidden inside channel (wall-facing side)\n\n'
-        f'  NO   = Hex pin (no hardware)\n'
-        f'         Hex pin embedded in floor wall + matching holes\n'
-        f'         Print Pin_N body separately; press-fit assembly\n'
-        f'         Pin hidden inside track floor (wall-facing side)\n\n'
+        f'  NO   = H-key (no hardware, approach B)\n'
+        f'         Identical socket cut in BOTH adjacent pieces\n'
+        f'         One shared Connector_Key body (print 1 per junction)\n'
+        f'         Slide key between pieces — fully hidden in floor\n\n'
         f'  CANCEL = Abort',
         'Choose Connector',
         adsk.core.MessageBoxButtonTypes.YesNoCancelButtonType
@@ -520,15 +522,16 @@ def cut_at_planes(root, ui, design, params):
         body.name = f'Track_Piece_{idx + 1}'
 
     if use_pin_connector:
-        connector_bodies = [b for b in root.bRepBodies if b.name.startswith('MaleBoss_')]
-        connector_label  = f'{clips_made}/{num_cuts} integral hex bosses created (MaleBoss_N)'
+        connector_bodies = [b for b in root.bRepBodies if b.name == 'Connector_Key']
+        connector_label  = (f'{clips_made}/{num_cuts} socket pairs cut + '
+                            f'{"1 Connector_Key body created" if connector_bodies else "Connector_Key already exists"}')
         assembly_tip = (
-            'Assembly tip: each piece has one integral hex boss (male) and one hex\n'
-            'socket (female) at its cut ends. Push the male boss of one piece into\n'
-            'the female socket of the next — friction press-fit, no hardware needed.\n'
-            'Connector is fully hidden inside the channel (wall-facing side).'
+            'Assembly tip: all pieces are identical — each end has the same socket.\n'
+            'Print one Connector_Key per junction. Slide key into piece A socket\n'
+            'until centred, then push piece B onto the protruding half.\n'
+            'Press-fit, no hardware. Key hidden inside floor material.'
         )
-        connector_export = '\u2022 MaleBoss_N bodies are integral — no separate export needed'
+        connector_export = '\u2022 Right-click Connector_Key body \u2192 Save As Mesh (print N copies)'
     else:
         connector_bodies = [b for b in root.bRepBodies if b.name.startswith('Clip_')]
         connector_label  = f'{clips_made}/{num_cuts} bridge plates created (Clip_N)'
@@ -1093,55 +1096,37 @@ def _detect_open_side_from_pts(pts_2d, s_min_x, s_max_x, s_min_y, s_max_y):
 # =============================================================================
 
 def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
-    """Floor-only cross/dovetail interlocking connector at junction `joint_num`.
+    """Approach B: identical socket in BOTH adjacent pieces + one shared H-key.
 
-    The entire connector lives INSIDE the floor material — nothing in the channel.
-    Cross-section (10-vertex closed polygon):
+    All track pieces are identical — no male/female alternation.
+    Each junction gets the same socket cut into both adjacent bodies.
+    A single Connector_Key body is created once (at junction 1) and reused
+    for all junctions.  Print one key per junction; press-fit into sockets.
 
-      ← NECK*2 →          y = 0   inner floor face (narrow opening)
-     /           \                 diagonal sides expand outward going down
-    |← EAR_HW*2 →|        y = −EAR_TOP   cross-arm top (widest)
-    |  cross arm  |        y = −EAR_BOT   cross-arm bottom
-     \           /                 sides narrow back to NECK
-      |← NECK*2→|                 stem
-      |__________|        y = −wt  outer floor face (flush)
+    Socket profile = key profile + HOLE_CL clearance on all faces.
+    Key profile = exact 10-vertex cross (no clearance — it IS the key).
 
-    Entanglement: cross-arm (EAR_HW) cannot escape upward (neck too narrow)
-    or downward (stem too narrow) — only in/out along track Z direction.
-    Invisible when assembled: no part visible inside channel or on outer face.
+    No combineFeatures anywhere.  Only extrudeFeatures + CutFeatureOperation
+    + participantBodies (proven working approach, no component ownership issues).
 
-    Architecture:
-      male_comp.combineFeatures(male_body, [boss], Join)
-      root.extrudeFeatures(sock_prof, Cut, participantBodies=[female_body])
+    Assembly: slide H-key into socket on piece A until centred, then slide
+    piece B onto the protruding half.  Key is fully hidden inside floor material
+    + tiny rise into channel; invisible from viewer-facing and wall-facing sides.
     """
-    PIN_DEPTH  = 1.0    # 10 mm engagement per side
+    PIN_DEPTH  = 1.0    # 10 mm engagement per side (20 mm total key length)
     HOLE_CL    = 0.04   # 0.4 mm clearance on each face of socket
-    PIN_EXTRA  = 0.05   # extra socket depth so boss never bottoms out
+    PIN_EXTRA  = 0.05   # extra socket depth so key never bottoms out
 
     wt       = params['WALL_THICKNESS']
-    fh       = params.get('FLOOR_HEIGHT', wt)   # kept for inward-direction probe
     inner_hw = (params['TRACK_WIDTH'] - 2.0 * wt) / 2.0   # inner channel half-width
 
-    # ── Floor-only cross/dovetail profile dimensions ────────────────────────
-    # Cross lives in floor material + tiny rise into channel for extra height.
-    #
-    #   ← NECK_HW*2 →              y = +CHANNEL_RISE  (just inside channel)
-    #  /               \           diagonal sides expanding into floor
-    # |←  EAR_HW*2  →  |          y = −EAR_TOP  (cross-arm top)
-    # |   cross arms    |          y = −EAR_BOT  (cross-arm bottom)
-    #  \               /           sides narrow back to NECK width
-    #   |← NECK_HW*2→|            y = −EAR_BOT  (stem top)
-    #   |    stem     |
-    #   |_____________|            y = −wt  (outer floor face, flush)
-    #
-    # Entanglement: cross-arm (EAR_HW) trapped between neck above and stem below.
-    # CHANNEL_RISE adds ~0.5 mm above inner floor → hidden when assembled.
-    NECK_HW      = wt * 0.50           # half-width at inner floor opening (1.5 mm)
-    EAR_HW       = inner_hw * 0.70     # cross-arm half-width (≈ 3.15 mm, in floor slab)
-    EAR_TOP      = wt * 0.35           # depth where diagonal meets arm top (≈ 1.05 mm)
-    EAR_BOT      = wt * 0.70           # depth where arm bottom meets stem (≈ 2.10 mm)
-    FLOOR_DIP    = wt                  # stem through full floor → flush outer face
-    CHANNEL_RISE = 0.05                # 0.5 mm boss above inner floor (into channel)
+    # ── Cross/dovetail profile dimensions ────────────────────────────────────
+    NECK_HW      = wt * 0.50           # half-width at neck (1.5 mm for wt=3 mm)
+    EAR_HW       = inner_hw * 0.70     # cross-arm half-width (≈3.15 mm)
+    EAR_TOP      = wt * 0.35           # depth to arm top (≈1.05 mm)
+    EAR_BOT      = wt * 0.70           # depth to arm bottom (≈2.10 mm)
+    FLOOR_DIP    = wt                  # stem flush with outer floor face
+    CHANNEL_RISE = 0.05                # 0.5 mm above inner floor (hidden in channel)
 
     # ── Orientation ──────────────────────────────────────────────────────────
     detect_sk = root.sketches.add(cut_plane)
@@ -1153,103 +1138,45 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     adjacent   = find_bodies_at_cut(root, cut_plane)
     cut_geom   = cut_plane.geometry
     cut_origin = cut_geom.origin
-    cut_normal = cut_geom.normal
-    cut_normal.normalize()
-
-    def _dot(tb):
-        try:
-            c = tb.physicalProperties.centerOfMass
-            return ((c.x - cut_origin.x) * cut_normal.x +
-                    (c.y - cut_origin.y) * cut_normal.y +
-                    (c.z - cut_origin.z) * cut_normal.z)
-        except:
-            return 0.0
 
     track_bodies = [b for b, _ in adjacent if b.name.startswith('Track_')]
-    track_bodies.sort(key=_dot)
+    if not track_bodies:
+        return False
+
+    # ── Guard: skip if sockets already created at this junction ──────────────
+    try:
+        for i in range(root.sketches.count):
+            if root.sketches.item(i).name == f'Socket_{joint_num}_0':
+                return True
+    except:
+        pass
 
     # ── Inner floor world position ────────────────────────────────────────────
-    # Track is flat (all in XY), so the inner floor Z is the same for every
-    # connector.  _ays tells us which world-Z direction is "into the channel":
-    #   _ays > 0 → local Y = world +Z = inward → outer floor at body bbox minZ
-    #   _ays < 0 → local Y = world -Z = inward → outer floor at body bbox maxZ
-    # inner floor Z = outer floor Z + _ays * wt  (one wall-thickness inward)
-    # XY stays at cut_origin (path centre on the cut plane).
-    _iyw = adsk.core.Vector3D.create(   # inward direction in world (for _key_profile)
+    _iyw = adsk.core.Vector3D.create(
         _ays * detect_tr.getCell(0, 1),
         _ays * detect_tr.getCell(1, 1),
         _ays * detect_tr.getCell(2, 1),
     )
     _iyw.normalize()
 
-    floor_w = None
-    if track_bodies:
-        _bb = track_bodies[0].boundingBox
-        _outer_z = _bb.minPoint.z if _ays > 0 else _bb.maxPoint.z
-        _inner_z = _outer_z + _ays * wt
-        floor_w  = adsk.core.Point3D.create(cut_origin.x, cut_origin.y, _inner_z)
-    if floor_w is None:
-        floor_w = adsk.core.Point3D.create(0.0, 0.0, 0.0)
-        floor_w.transformBy(detect_tr)
+    _bb      = track_bodies[0].boundingBox
+    _outer_z = _bb.minPoint.z if _ays > 0 else _bb.maxPoint.z
+    _inner_z = _outer_z + _ays * wt
+    floor_w  = adsk.core.Point3D.create(cut_origin.x, cut_origin.y, _inner_z)
 
-    if joint_num % 2 == 1:
-        male_body   = track_bodies[0] if len(track_bodies) > 0 else None
-        female_body = track_bodies[1] if len(track_bodies) > 1 else None
-    else:
-        male_body   = track_bodies[1] if len(track_bodies) > 1 else None
-        female_body = track_bodies[0] if len(track_bodies) > 0 else None
-
-    male_comp   = (getattr(male_body,   'parentComponent', None) or root) if male_body   else root
-    female_comp = (getattr(female_body, 'parentComponent', None) or root) if female_body else root
-
-    # ── Guard ────────────────────────────────────────────────────────────────
-    try:
-        for i in range(root.sketches.count):
-            if root.sketches.item(i).name == f'PinBoss_{joint_num}':
-                return True
-    except:
-        pass
-
-    # ── Clean up stale floating bodies ───────────────────────────────────────
-    for sn in (f'MaleBoss_{joint_num}', f'MaleCollar_{joint_num}',
-               f'SocketCutter_{joint_num}', f'FemCutter_{joint_num}'):
-        for b in list(root.bRepBodies):
-            if b.name == sn:
-                try: b.deleteMe()
-                except: pass
-
-    # ── 10-vertex floor-only cross profile ───────────────────────────────────
-    def _key_profile(comp, sk_name, neck, ear, ear_top, ear_bot, floor_d,
+    # ── Shared profile builder ────────────────────────────────────────────────
+    def _key_profile(sk_name, neck, ear, ear_top, ear_bot, floor_d,
                      channel_rise=0.0):
-        """Inverted dovetail + cross-arm key in floor material + channel_rise.
-
-        comp         : component to create the sketch in (male_comp or root)
-        neck         : half-width at the neck (top and stem)
-        ear          : half-width of cross-arms (creates the mechanical lock)
-        ear_top      : depth below inner floor where diagonal meets arm top
-        ear_bot      : depth where arm bottom meets stem
-        floor_d      : total depth to outer face
-        channel_rise : how far above the inner floor the top vertex sits
-                       (tiny boss in channel — hidden when assembled, adds height)
-
-        10 vertices (v0..v9), CCW:
-          v0,v1: top edge at fy + channel_rise (just above inner floor)
-          v2,v9: diagonal shoulder (arm_top depth)
-          v3,v8: arm bottom (arm_bot depth)
-          v4,v7: stem top
-          v5,v6: outer floor (flat bottom)
-        """
-        sk = comp.sketches.add(cut_plane)
+        """Build 10-vertex cross profile on cut_plane; return (sketch, profile)."""
+        sk = root.sketches.add(cut_plane)
         sk.name = sk_name
         sk_inv = sk.transform.copy()
         sk_inv.invert()
 
-        # Inner floor in sketch-local
         fp = floor_w.copy()
         fp.transformBy(sk_inv)
         fx, fy = fp.x, fp.y
 
-        # Determine which sketch-Y direction is "inward" (toward channel interior)
         _ch = adsk.core.Point3D.create(
             floor_w.x + 0.5 * _iyw.x,
             floor_w.y + 0.5 * _iyw.y,
@@ -1258,23 +1185,22 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
         _ch.transformBy(sk_inv)
         inward = 1.0 if (_ch.y - fy) >= 0.0 else -1.0
 
-        # _fld(d): move d cm INTO the floor (away from channel)
         def _fld(d):
             return fy - inward * d
 
-        top_y = fy + inward * channel_rise   # slightly into channel
+        top_y = fy + inward * channel_rise
 
         verts = [
-            (-neck,  top_y),           # v0  top-left  (neck, channel side)
-            ( neck,  top_y),           # v1  top-right
-            ( ear,   _fld(ear_top)),   # v2  diagonal → right arm top
-            ( ear,   _fld(ear_bot)),   # v3  right arm bottom
-            ( neck,  _fld(ear_bot)),   # v4  stem top right
-            ( neck,  _fld(floor_d)),   # v5  outer floor right
-            (-neck,  _fld(floor_d)),   # v6  outer floor left
-            (-neck,  _fld(ear_bot)),   # v7  stem top left
-            (-ear,   _fld(ear_bot)),   # v8  left arm bottom
-            (-ear,   _fld(ear_top)),   # v9  left arm top → closes to v0
+            (-neck,  top_y),
+            ( neck,  top_y),
+            ( ear,   _fld(ear_top)),
+            ( ear,   _fld(ear_bot)),
+            ( neck,  _fld(ear_bot)),
+            ( neck,  _fld(floor_d)),
+            (-neck,  _fld(floor_d)),
+            (-neck,  _fld(ear_bot)),
+            (-ear,   _fld(ear_bot)),
+            (-ear,   _fld(ear_top)),
         ]
 
         L = sk.sketchCurves.sketchLines
@@ -1284,7 +1210,7 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
             L.addByTwoPoints(adsk.core.Point3D.create(ax, ay, 0),
                              adsk.core.Point3D.create(bx, by, 0))
 
-        # Target = centre of cross-arm zone (most distinctive part of profile)
+        # Pick profile nearest centre of cross-arm zone
         tgt_x = fx
         tgt_y = _fld((ear_top + ear_bot) / 2.0)
         best_prof, best_d2 = None, 1e18
@@ -1300,82 +1226,61 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
         sk.isLightBulbOn = False
         return sk, best_prof
 
-    def _extrude_newbody(comp, prof, depth):
-        """Extrude `prof` symmetrically as a new body in `comp` context."""
-        ei = comp.features.extrudeFeatures.createInput(
-            prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-        ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(depth), True)
-        feat = comp.features.extrudeFeatures.add(ei)
-        return feat.bodies.item(0) if feat.bodies.count > 0 else None
-
     success = False
+    extrudes = root.features.extrudeFeatures
 
-    # ── Male boss ─────────────────────────────────────────────────────────────
-    # Boss is created IN male_comp so that combineFeatures stays intra-component
-    # (avoids the cross-component root↔Track_Assembly body ownership issue).
-    boss_body = None
-    if male_body is not None:
-        try:
-            _, boss_prof = _key_profile(
-                male_comp,
-                f'PinBoss_{joint_num}',
-                NECK_HW, EAR_HW, EAR_TOP, EAR_BOT, FLOOR_DIP,
-                channel_rise=CHANNEL_RISE,
-            )
-            if boss_prof is not None:
-                boss_body = _extrude_newbody(male_comp, boss_prof, PIN_DEPTH)
-                if boss_body:
-                    boss_body.name = f'MaleBoss_{joint_num}'
-        except Exception as e:
-            if ui:
-                ui.messageBox(f'MaleBoss extrude failed (jct {joint_num}):\n'
-                              f'{e}\n{traceback.format_exc()}')
-
-    if boss_body is not None and male_body is not None:
-        try:
-            tc = adsk.core.ObjectCollection.create()
-            tc.add(boss_body)
-            ji = male_comp.features.combineFeatures.createInput(male_body, tc)
-            ji.operation        = adsk.fusion.FeatureOperations.JoinFeatureOperation
-            ji.isKeepToolBodies = False
-            male_comp.features.combineFeatures.add(ji)
-            success = True
-        except Exception as e:
-            if ui:
-                ui.messageBox(f'MaleBoss→TrackJoin failed (jct {joint_num}):\n'
-                              f'{e}\n{traceback.format_exc()}')
-            try: boss_body.deleteMe()
-            except: pass
-
-    # ── Female socket ─────────────────────────────────────────────────────────
-    # Socket sketch stays in root; extrudeFeatures + participantBodies proven
-    # for cross-component cuts.  HOLE_CL clearance on all faces;
-    # channel_rise also enlarged so the boss fits without friction at the top.
-    if female_body is not None:
+    # ── Cut identical socket into each adjacent track body ────────────────────
+    for body_idx, body in enumerate(track_bodies):
         try:
             _, sock_prof = _key_profile(
-                root,
-                f'FemSocket_{joint_num}',
-                NECK_HW + HOLE_CL, EAR_HW + HOLE_CL,
-                EAR_TOP - HOLE_CL,              # arm starts sooner → diagonal clearance
-                EAR_BOT + HOLE_CL,              # arm ends later
+                f'Socket_{joint_num}_{body_idx}',
+                NECK_HW + HOLE_CL,
+                EAR_HW  + HOLE_CL,
+                EAR_TOP - HOLE_CL,          # arm starts sooner → diagonal clearance
+                EAR_BOT + HOLE_CL,          # arm ends later
                 FLOOR_DIP + HOLE_CL,
-                channel_rise=CHANNEL_RISE + HOLE_CL,  # matches boss rise + clearance
+                channel_rise=CHANNEL_RISE + HOLE_CL,
             )
             if sock_prof is not None:
-                ei = root.features.extrudeFeatures.createInput(
+                ei = extrudes.createInput(
                     sock_prof,
                     adsk.fusion.FeatureOperations.CutFeatureOperation,
                 )
                 ei.setSymmetricExtent(
                     adsk.core.ValueInput.createByReal(PIN_DEPTH + PIN_EXTRA), True
                 )
-                ei.participantBodies = [female_body]
-                root.features.extrudeFeatures.add(ei)
+                ei.participantBodies = [body]
+                extrudes.add(ei)
                 success = True
         except Exception as e:
             if ui:
-                ui.messageBox(f'FemSocket cut failed (jct {joint_num}):\n'
+                ui.messageBox(f'Socket cut failed (jct {joint_num}, body {body.name}):\n'
+                              f'{e}\n{traceback.format_exc()}')
+
+    # ── H-key body — created ONCE, shared across all junctions ───────────────
+    # Check root bodies for existing Connector_Key.
+    key_exists = any(b.name == 'Connector_Key' for b in root.bRepBodies)
+    if not key_exists:
+        try:
+            _, key_prof = _key_profile(
+                f'ConnectorKey_{joint_num}',
+                NECK_HW, EAR_HW, EAR_TOP, EAR_BOT, FLOOR_DIP,
+                channel_rise=CHANNEL_RISE,
+            )
+            if key_prof is not None:
+                ei = extrudes.createInput(
+                    key_prof,
+                    adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
+                )
+                ei.setSymmetricExtent(
+                    adsk.core.ValueInput.createByReal(PIN_DEPTH), True
+                )
+                feat = extrudes.add(ei)
+                if feat.bodies.count > 0:
+                    feat.bodies.item(0).name = 'Connector_Key'
+        except Exception as e:
+            if ui:
+                ui.messageBox(f'Connector_Key creation failed (jct {joint_num}):\n'
                               f'{e}\n{traceback.format_exc()}')
 
     return success
