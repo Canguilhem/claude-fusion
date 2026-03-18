@@ -1238,47 +1238,29 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     cut_normal_v = cut_geom.normal
     cut_normal_v.normalize()
 
-    # ── Cut identical socket + add retention boss into each adjacent track body ──
-    # Boss: rectangular lip on the inner floor face at the junction end of each piece.
-    # Extends COLLAR_H into the channel and COLLAR_LEN/2 into the piece body.
-    # Traps the key vertically (key slides in laterally, cannot pull upward).
-    # Boss is merged INTO the track piece — key stays clean (cross body only).
+    # ── Per-body: boss join FIRST, then socket cut ───────────────────────────
+    # Order matters: boss is added as solid material (joins to track piece), then
+    # the socket cut carves through BOTH the floor AND the bottom of the boss.
+    # This leaves the boss flanges as a retention lip over the key's neck.
+    #
+    # Boss geometry (at junction face, extruding into piece body):
+    #   width  = COLLAR_HW*2  (full inner channel width minus small clearance)
+    #   height = COLLAR_H     (1.5 mm above inner floor face, into channel)
+    #   depth  = COLLAR_LEN/2 (2 mm into the piece body)
+    #
+    # Socket then cuts:
+    #   - Full 10-vertex cross through the floor (captures key cross-arms)
+    #   - CHANNEL_RISE + HOLE_CL = 0.7 mm notch through bottom of boss
+    #     → leaves (COLLAR_H - CHANNEL_RISE - HOLE_CL) = 0.8 mm retention lip
+    #       on each side of the neck opening
     for body_idx, body in enumerate(track_bodies):
-        # Socket cut
+        # ── Step 1: Retention boss (add material, fuse to track piece) ────────
         try:
-            _, sock_prof = _key_profile(
-                f'Socket_{joint_num}_{body_idx}',
-                NECK_HW + HOLE_CL,
-                EAR_HW  + HOLE_CL,
-                EAR_TOP - HOLE_CL,          # arm starts sooner → diagonal clearance
-                EAR_BOT + HOLE_CL,          # arm ends later
-                FLOOR_DIP + HOLE_CL,
-                channel_rise=CHANNEL_RISE + HOLE_CL,
-            )
-            if sock_prof is not None:
-                ei = extrudes.createInput(
-                    sock_prof,
-                    adsk.fusion.FeatureOperations.CutFeatureOperation,
-                )
-                ei.setSymmetricExtent(
-                    adsk.core.ValueInput.createByReal(PIN_DEPTH + PIN_EXTRA), True
-                )
-                ei.participantBodies = [body]
-                extrudes.add(ei)
-                success = True
-        except Exception as e:
-            if ui:
-                ui.messageBox(f'Socket cut failed (jct {joint_num}, body {body.name}):\n'
-                              f'{e}\n{traceback.format_exc()}')
-
-        # Retention boss — merged into this track piece
-        try:
-            # Which side of the cut plane is this body on?  Extrude into that side.
             c = body.physicalProperties.centerOfMass
             side_dot = ((c.x - cut_origin.x) * cut_normal_v.x +
                         (c.y - cut_origin.y) * cut_normal_v.y +
                         (c.z - cut_origin.z) * cut_normal_v.z)
-            # Positive distance → extrudes in cut_plane normal direction
+            # Positive ext_dist → extrudes in cut_plane normal direction (into body)
             ext_dist = (COLLAR_LEN / 2.0) * (1.0 if side_dot >= 0 else -1.0)
 
             boss_sk = root.sketches.add(cut_plane)
@@ -1298,7 +1280,6 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
             _ch_b.transformBy(boss_inv)
             inward_b = 1.0 if (_ch_b.y - fy_b) >= 0.0 else -1.0
 
-            # Rectangle spanning full inner channel width, COLLAR_H into channel
             boss_pts = [
                 (-COLLAR_HW, fy_b),
                 ( COLLAR_HW, fy_b),
@@ -1325,7 +1306,6 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                 boss_feat = extrudes.add(ei)
                 if boss_feat.bodies.count > 0:
                     boss_body = boss_feat.bodies.item(0)
-                    # Join boss into track piece (both root-level bodies → safe)
                     tc = adsk.core.ObjectCollection.create()
                     tc.add(boss_body)
                     ji = root.features.combineFeatures.createInput(body, tc)
@@ -1337,6 +1317,33 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
         except Exception as e:
             if ui:
                 ui.messageBox(f'RetainBoss failed (jct {joint_num}, body {body.name}):\n'
+                              f'{e}\n{traceback.format_exc()}')
+
+        # ── Step 2: Socket cut (cuts through floor + bottom of boss) ──────────
+        try:
+            _, sock_prof = _key_profile(
+                f'Socket_{joint_num}_{body_idx}',
+                NECK_HW + HOLE_CL,
+                EAR_HW  + HOLE_CL,
+                EAR_TOP - HOLE_CL,
+                EAR_BOT + HOLE_CL,
+                FLOOR_DIP + HOLE_CL,
+                channel_rise=CHANNEL_RISE + HOLE_CL,
+            )
+            if sock_prof is not None:
+                ei = extrudes.createInput(
+                    sock_prof,
+                    adsk.fusion.FeatureOperations.CutFeatureOperation,
+                )
+                ei.setSymmetricExtent(
+                    adsk.core.ValueInput.createByReal(PIN_DEPTH + PIN_EXTRA), True
+                )
+                ei.participantBodies = [body]
+                extrudes.add(ei)
+                success = True
+        except Exception as e:
+            if ui:
+                ui.messageBox(f'Socket cut failed (jct {joint_num}, body {body.name}):\n'
                               f'{e}\n{traceback.format_exc()}')
 
     # ── H-key body — created ONCE, shared across all junctions ───────────────
