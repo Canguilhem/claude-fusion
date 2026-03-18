@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "Test script for finger joint mechanism"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

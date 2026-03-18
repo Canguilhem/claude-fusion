@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "Diagonal split U-channel with perpendicular inserts for locking pieces together"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

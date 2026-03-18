@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "TrackAutoCutter",
+    "description": {
+        "": "Convert Track_Piece bodies to separate components for easy export"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

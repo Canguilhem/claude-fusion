@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "Test script for dovetail cutter mechanism"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

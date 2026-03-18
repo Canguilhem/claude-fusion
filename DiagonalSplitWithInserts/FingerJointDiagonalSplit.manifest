@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "Create finger joint (comb joint) along diagonal split - pieces interlock naturally without separate inserts"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

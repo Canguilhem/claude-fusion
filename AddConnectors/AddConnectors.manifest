@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "TrackAutoCutter",
+    "description": {
+        "": "Manually add pin/hole connectors between track pieces"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
