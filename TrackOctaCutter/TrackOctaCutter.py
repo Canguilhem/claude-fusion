@@ -1235,9 +1235,16 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
 
     success = False
     extrudes = root.features.extrudeFeatures
+    cut_normal_v = cut_geom.normal
+    cut_normal_v.normalize()
 
-    # ── Cut identical socket into each adjacent track body ────────────────────
+    # ── Cut identical socket + add retention boss into each adjacent track body ──
+    # Boss: rectangular lip on the inner floor face at the junction end of each piece.
+    # Extends COLLAR_H into the channel and COLLAR_LEN/2 into the piece body.
+    # Traps the key vertically (key slides in laterally, cannot pull upward).
+    # Boss is merged INTO the track piece — key stays clean (cross body only).
     for body_idx, body in enumerate(track_bodies):
+        # Socket cut
         try:
             _, sock_prof = _key_profile(
                 f'Socket_{joint_num}_{body_idx}',
@@ -1264,14 +1271,78 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                 ui.messageBox(f'Socket cut failed (jct {joint_num}, body {body.name}):\n'
                               f'{e}\n{traceback.format_exc()}')
 
-    # ── H-key body + collar — created ONCE, shared across all junctions ────────
-    # Connector_Key: 10-vertex cross body (20 mm total, symmetric PIN_DEPTH each side).
-    # Collar: rectangular boss centred at junction, sits on inner floor face,
-    # protrudes COLLAR_H into channel (wall-hidden side).  Acts as assembly stop
-    # and covers the junction gap.  Both combined into a single Connector_Key body.
+        # Retention boss — merged into this track piece
+        try:
+            # Which side of the cut plane is this body on?  Extrude into that side.
+            c = body.physicalProperties.centerOfMass
+            side_dot = ((c.x - cut_origin.x) * cut_normal_v.x +
+                        (c.y - cut_origin.y) * cut_normal_v.y +
+                        (c.z - cut_origin.z) * cut_normal_v.z)
+            # Positive distance → extrudes in cut_plane normal direction
+            ext_dist = (COLLAR_LEN / 2.0) * (1.0 if side_dot >= 0 else -1.0)
+
+            boss_sk = root.sketches.add(cut_plane)
+            boss_sk.name = f'RetainBoss_{joint_num}_{body_idx}'
+            boss_inv = boss_sk.transform.copy()
+            boss_inv.invert()
+
+            fp_b = floor_w.copy()
+            fp_b.transformBy(boss_inv)
+            fx_b, fy_b = fp_b.x, fp_b.y
+
+            _ch_b = adsk.core.Point3D.create(
+                floor_w.x + 0.5 * _iyw.x,
+                floor_w.y + 0.5 * _iyw.y,
+                floor_w.z + 0.5 * _iyw.z,
+            )
+            _ch_b.transformBy(boss_inv)
+            inward_b = 1.0 if (_ch_b.y - fy_b) >= 0.0 else -1.0
+
+            # Rectangle spanning full inner channel width, COLLAR_H into channel
+            boss_pts = [
+                (-COLLAR_HW, fy_b),
+                ( COLLAR_HW, fy_b),
+                ( COLLAR_HW, fy_b + inward_b * COLLAR_H),
+                (-COLLAR_HW, fy_b + inward_b * COLLAR_H),
+            ]
+            sk_lines = boss_sk.sketchCurves.sketchLines
+            for i in range(4):
+                a, b_pt = boss_pts[i], boss_pts[(i + 1) % 4]
+                sk_lines.addByTwoPoints(
+                    adsk.core.Point3D.create(a[0],    a[1],    0),
+                    adsk.core.Point3D.create(b_pt[0], b_pt[1], 0),
+                )
+
+            if boss_sk.profiles.count > 0:
+                boss_prof = boss_sk.profiles.item(0)
+                ei = extrudes.createInput(
+                    boss_prof,
+                    adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
+                )
+                ei.setDistanceExtent(
+                    False, adsk.core.ValueInput.createByReal(ext_dist)
+                )
+                boss_feat = extrudes.add(ei)
+                if boss_feat.bodies.count > 0:
+                    boss_body = boss_feat.bodies.item(0)
+                    # Join boss into track piece (both root-level bodies → safe)
+                    tc = adsk.core.ObjectCollection.create()
+                    tc.add(boss_body)
+                    ji = root.features.combineFeatures.createInput(body, tc)
+                    ji.operation        = adsk.fusion.FeatureOperations.JoinFeatureOperation
+                    ji.isKeepToolBodies = False
+                    root.features.combineFeatures.add(ji)
+
+            boss_sk.isLightBulbOn = False
+        except Exception as e:
+            if ui:
+                ui.messageBox(f'RetainBoss failed (jct {joint_num}, body {body.name}):\n'
+                              f'{e}\n{traceback.format_exc()}')
+
+    # ── H-key body — created ONCE, shared across all junctions ───────────────
+    # Clean cross body only — no collar.  Boss retention is on the track pieces.
     key_exists = any(b.name == 'Connector_Key' for b in root.bRepBodies)
     if not key_exists:
-        key_body = None
         try:
             _, key_prof = _key_profile(
                 f'ConnectorKey_{joint_num}',
@@ -1288,76 +1359,11 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                 )
                 feat = extrudes.add(ei)
                 if feat.bodies.count > 0:
-                    key_body = feat.bodies.item(0)
-                    key_body.name = 'Connector_Key'
+                    feat.bodies.item(0).name = 'Connector_Key'
         except Exception as e:
             if ui:
                 ui.messageBox(f'Connector_Key creation failed (jct {joint_num}):\n'
                               f'{e}\n{traceback.format_exc()}')
-
-        # ── Collar boss ───────────────────────────────────────────────────────
-        # Rectangular slab at junction centre: COLLAR_HW*2 wide, COLLAR_LEN long,
-        # COLLAR_H tall above inner floor face (into channel).
-        if key_body is not None:
-            try:
-                collar_sk = root.sketches.add(cut_plane)
-                collar_sk.name = f'Collar_{joint_num}'
-                collar_inv = collar_sk.transform.copy()
-                collar_inv.invert()
-
-                fp_c = floor_w.copy()
-                fp_c.transformBy(collar_inv)
-                fx_c, fy_c = fp_c.x, fp_c.y
-
-                # Inward direction in collar_sk (into channel)
-                _ch_c = adsk.core.Point3D.create(
-                    floor_w.x + 0.5 * _iyw.x,
-                    floor_w.y + 0.5 * _iyw.y,
-                    floor_w.z + 0.5 * _iyw.z,
-                )
-                _ch_c.transformBy(collar_inv)
-                inward_c = 1.0 if (_ch_c.y - fy_c) >= 0.0 else -1.0
-
-                # Rectangle: full width across channel, COLLAR_H into channel
-                coll_pts = [
-                    (-COLLAR_HW, fy_c),
-                    ( COLLAR_HW, fy_c),
-                    ( COLLAR_HW, fy_c + inward_c * COLLAR_H),
-                    (-COLLAR_HW, fy_c + inward_c * COLLAR_H),
-                ]
-                sk_lines = collar_sk.sketchCurves.sketchLines
-                for i in range(4):
-                    a, b_pt = coll_pts[i], coll_pts[(i + 1) % 4]
-                    sk_lines.addByTwoPoints(
-                        adsk.core.Point3D.create(a[0],    a[1],    0),
-                        adsk.core.Point3D.create(b_pt[0], b_pt[1], 0),
-                    )
-
-                if collar_sk.profiles.count > 0:
-                    collar_prof = collar_sk.profiles.item(0)
-                    ei = extrudes.createInput(
-                        collar_prof,
-                        adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
-                    )
-                    ei.setSymmetricExtent(
-                        adsk.core.ValueInput.createByReal(COLLAR_LEN / 2.0), True
-                    )
-                    collar_feat = extrudes.add(ei)
-                    if collar_feat.bodies.count > 0:
-                        collar_body = collar_feat.bodies.item(0)
-                        # Join collar to key (both in root — no cross-component issue)
-                        tc = adsk.core.ObjectCollection.create()
-                        tc.add(collar_body)
-                        ji = root.features.combineFeatures.createInput(key_body, tc)
-                        ji.operation        = adsk.fusion.FeatureOperations.JoinFeatureOperation
-                        ji.isKeepToolBodies = False
-                        root.features.combineFeatures.add(ji)
-
-                collar_sk.isLightBulbOn = False
-            except Exception as e:
-                if ui:
-                    ui.messageBox(f'Collar creation failed (jct {joint_num}):\n'
-                                  f'{e}\n{traceback.format_exc()}')
 
     return success
 
