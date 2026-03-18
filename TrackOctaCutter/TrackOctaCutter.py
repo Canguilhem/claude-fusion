@@ -1159,10 +1159,11 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
         pass
 
     # ── Inner floor world position ────────────────────────────────────────────
-    # The track path is drawn ON the inner floor surface.
-    # setByDistanceOnPath places the cut_plane with its origin exactly at the
-    # path point → cut_origin IS the inner floor point for every junction.
-    # Do NOT derive from bounding box — bbox is unreliable at hairpins.
+    # The track path is drawn on the OUTER floor face (viewer-facing side).
+    # setByDistanceOnPath places cut_origin at the outer floor face.
+    # Inner floor = outer floor + wall_thickness inward toward channel.
+    # Using cut_origin + wt*_iyw is robust: cut_origin is always exact, and
+    # _iyw is the inward direction from detect_sk — no bbox dependency.
     _iyw = adsk.core.Vector3D.create(
         _ays * detect_tr.getCell(0, 1),
         _ays * detect_tr.getCell(1, 1),
@@ -1170,7 +1171,11 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     )
     _iyw.normalize()
 
-    floor_w = adsk.core.Point3D.create(cut_origin.x, cut_origin.y, cut_origin.z)
+    floor_w = adsk.core.Point3D.create(
+        cut_origin.x + _iyw.x * wt,
+        cut_origin.y + _iyw.y * wt,
+        cut_origin.z + _iyw.z * wt,
+    )
 
     # ── Shared profile builder ────────────────────────────────────────────────
     def _key_profile(sk_name, neck, ear, ear_top, ear_bot, floor_d,
