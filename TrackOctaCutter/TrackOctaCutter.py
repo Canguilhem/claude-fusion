@@ -522,16 +522,16 @@ def cut_at_planes(root, ui, design, params):
         body.name = f'Track_Piece_{idx + 1}'
 
     if use_pin_connector:
-        connector_bodies = [b for b in root.bRepBodies if b.name == 'Connector_Key']
+        connector_bodies = [b for b in root.bRepBodies if b.name.startswith('Connector_Key_')]
         connector_label  = (f'{clips_made}/{num_cuts} socket pairs cut + '
-                            f'{"1 Connector_Key body created" if connector_bodies else "Connector_Key already exists"}')
+                            f'{len(connector_bodies)} Connector_Key bodies created')
         assembly_tip = (
             'Assembly tip: all pieces are identical — each end has the same socket.\n'
             'Print one Connector_Key per junction. Slide key into piece A socket\n'
             'until centred, then push piece B onto the protruding half.\n'
             'Press-fit, no hardware. Key hidden inside floor material.'
         )
-        connector_export = '\u2022 Right-click Connector_Key body \u2192 Save As Mesh (print N copies)'
+        connector_export = '\u2022 Right-click each Connector_Key_N body \u2192 Save As Mesh'
     else:
         connector_bodies = [b for b in root.bRepBodies if b.name.startswith('Clip_')]
         connector_label  = f'{clips_made}/{num_cuts} bridge plates created (Clip_N)'
@@ -1100,8 +1100,8 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
 
     All track pieces are identical — no male/female alternation.
     Each junction gets the same socket cut into both adjacent bodies.
-    A single Connector_Key body is created once (at junction 1) and reused
-    for all junctions.  Print one key per junction; press-fit into sockets.
+    One Connector_Key_N body is created per junction, placed at that junction's
+    cut plane with a collar slab.  Print one key per junction; press-fit into sockets.
 
     Socket profile = key profile + HOLE_CL clearance on all faces.
     Key profile = exact 10-vertex cross (no clearance — it IS the key).
@@ -1114,7 +1114,7 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     + tiny rise into channel; invisible from viewer-facing and wall-facing sides.
     """
     PIN_DEPTH  = 1.0    # 10 mm engagement per side (20 mm total key length)
-    HOLE_CL    = 0.02   # 0.2 mm clearance on each face of socket (tighter fit)
+    HOLE_CL    = 0.01   # 0.1 mm clearance on each face of socket
     PIN_EXTRA  = 0.05   # extra socket depth so key never bottoms out
 
     wt       = params['WALL_THICKNESS']
@@ -1132,8 +1132,10 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     # Acts as assembly stop + covers junction gap.  Protrudes into channel
     # (wall-hidden side) so invisible when track is mounted.
     COLLAR_HW  = inner_hw - 0.03      # slightly narrower than inner channel
-    COLLAR_H   = 0.15                 # 1.5 mm tall above inner floor face
-    COLLAR_LEN = 0.40                 # 4 mm total (±2 mm each side of junction)
+    COLLAR_H   = 0.40                 # 4.0 mm tall above inner floor — bore fits at mid-height
+    COLLAR_LEN = 0.40                 # 4 mm per piece
+    BORE_R     = 0.080                # 1.6 mm diameter — M2 tap drill size
+    BORE_DEPTH = 0.40                 # 4 mm per piece (8 mm total when assembled)
 
     # ── Orientation ──────────────────────────────────────────────────────────
     detect_sk = root.sketches.add(cut_plane)
@@ -1146,7 +1148,9 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     cut_geom   = cut_plane.geometry
     cut_origin = cut_geom.origin
 
-    track_bodies = [b for b, _ in adjacent if b.name.startswith('Track_')]
+    # Keep face alongside body — used for junction-face collar sketching below
+    track_pairs  = [(b, f) for b, f in adjacent if b.name.startswith('Track_')]
+    track_bodies = [b for b, f in track_pairs]
     if not track_bodies:
         return False
 
@@ -1180,7 +1184,11 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     # ── Shared profile builder ────────────────────────────────────────────────
     def _key_profile(sk_name, neck, ear, ear_top, ear_bot, floor_d,
                      channel_rise=0.0):
-        """Build 10-vertex cross profile on cut_plane; return (sketch, profile)."""
+        """Build 8-vertex H profile on cut_plane; return (sketch, profile).
+
+        The centre stem (floor_d) is intentionally omitted — the profile stops
+        at ear_bot depth so no hole is punched through the outer floor face.
+        """
         sk = root.sketches.add(cut_plane)
         sk.name = sk_name
         sk_inv = sk.transform.copy()
@@ -1203,15 +1211,15 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
 
         top_y = fy + inward * channel_rise
 
+        # 8-vertex H/I-beam: neck above floor, two ears into floor, no centre
+        # stem — outer floor face stays solid.
         verts = [
             (-neck,  top_y),
             ( neck,  top_y),
             ( ear,   _fld(ear_top)),
             ( ear,   _fld(ear_bot)),
-            ( neck,  _fld(ear_bot)),
-            ( neck,  _fld(floor_d)),
-            (-neck,  _fld(floor_d)),
-            (-neck,  _fld(ear_bot)),
+            ( neck,  _fld(ear_bot)),   # inner-right of ear (was stem top-right)
+            (-neck,  _fld(ear_bot)),   # inner-left of ear  (was stem top-left)
             (-ear,   _fld(ear_bot)),
             (-ear,   _fld(ear_top)),
         ]
@@ -1244,88 +1252,160 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     cut_normal_v = cut_geom.normal
     cut_normal_v.normalize()
 
-    # ── Per-body: boss join FIRST, then socket cut ───────────────────────────
-    # Order matters: boss is added as solid material (joins to track piece), then
-    # the socket cut carves through BOTH the floor AND the bottom of the boss.
-    # This leaves the boss flanges as a retention lip over the key's neck.
-    #
-    # Boss geometry (at junction face, extruding into piece body):
-    #   width  = COLLAR_HW*2  (full inner channel width minus small clearance)
-    #   height = COLLAR_H     (1.5 mm above inner floor face, into channel)
-    #   depth  = COLLAR_LEN/2 (2 mm into the piece body)
-    #
-    # Socket then cuts:
-    #   - Full 10-vertex cross through the floor (captures key cross-arms)
-    #   - CHANNEL_RISE + HOLE_CL = 0.7 mm notch through bottom of boss
-    #     → leaves (COLLAR_H - CHANNEL_RISE - HOLE_CL) = 0.8 mm retention lip
-    #       on each side of the neck opening
-    for body_idx, body in enumerate(track_bodies):
-        # ── Step 1: Retention boss (add material, fuse to track piece) ────────
-        try:
-            c = body.physicalProperties.centerOfMass
-            side_dot = ((c.x - cut_origin.x) * cut_normal_v.x +
-                        (c.y - cut_origin.y) * cut_normal_v.y +
-                        (c.z - cut_origin.z) * cut_normal_v.z)
-            # Positive ext_dist → extrudes in cut_plane normal direction (into body)
-            ext_dist = (COLLAR_LEN / 2.0) * (1.0 if side_dot >= 0 else -1.0)
+    # ── Step 1: Symmetric collar boss ────────────────────────────────────────
+    # One sketch + setSymmetricExtent → single body straddling the cut plane.
+    # No direction detection needed at all.
+    cut_normal = cut_geom.normal.copy()
+    cut_normal.normalize()
 
-            boss_sk = root.sketches.add(cut_plane)
-            boss_sk.name = f'RetainBoss_{joint_num}_{body_idx}'
-            boss_inv = boss_sk.transform.copy()
-            boss_inv.invert()
+    boss_sk = None
+    boss_halves = []
+    try:
+        boss_sk = root.sketches.add(cut_plane)
+        boss_sk.name = f'RetainBoss_{joint_num}'
+        boss_inv = boss_sk.transform.copy()
+        boss_inv.invert()
 
-            fp_b = floor_w.copy()
-            fp_b.transformBy(boss_inv)
-            fx_b, fy_b = fp_b.x, fp_b.y
+        fp_b = floor_w.copy()
+        fp_b.transformBy(boss_inv)
+        fy_b = fp_b.y
 
-            _ch_b = adsk.core.Point3D.create(
-                floor_w.x + 0.5 * _iyw.x,
-                floor_w.y + 0.5 * _iyw.y,
-                floor_w.z + 0.5 * _iyw.z,
+        _ch_b = adsk.core.Point3D.create(
+            floor_w.x + 0.5 * _iyw.x,
+            floor_w.y + 0.5 * _iyw.y,
+            floor_w.z + 0.5 * _iyw.z,
+        )
+        _ch_b.transformBy(boss_inv)
+        inward_b = 1.0 if (_ch_b.y - fy_b) >= 0.0 else -1.0
+
+        boss_pts = [
+            (-COLLAR_HW, fy_b),
+            ( COLLAR_HW, fy_b),
+            ( COLLAR_HW, fy_b + inward_b * COLLAR_H),
+            (-COLLAR_HW, fy_b + inward_b * COLLAR_H),
+        ]
+        L = boss_sk.sketchCurves.sketchLines
+        for i in range(4):
+            a, b_pt = boss_pts[i], boss_pts[(i + 1) % 4]
+            L.addByTwoPoints(
+                adsk.core.Point3D.create(a[0], a[1], 0),
+                adsk.core.Point3D.create(b_pt[0], b_pt[1], 0),
             )
-            _ch_b.transformBy(boss_inv)
-            inward_b = 1.0 if (_ch_b.y - fy_b) >= 0.0 else -1.0
+        boss_sk.isLightBulbOn = False
 
-            boss_pts = [
-                (-COLLAR_HW, fy_b),
-                ( COLLAR_HW, fy_b),
-                ( COLLAR_HW, fy_b + inward_b * COLLAR_H),
-                (-COLLAR_HW, fy_b + inward_b * COLLAR_H),
-            ]
-            sk_lines = boss_sk.sketchCurves.sketchLines
-            for i in range(4):
-                a, b_pt = boss_pts[i], boss_pts[(i + 1) % 4]
-                sk_lines.addByTwoPoints(
-                    adsk.core.Point3D.create(a[0],    a[1],    0),
-                    adsk.core.Point3D.create(b_pt[0], b_pt[1], 0),
-                )
+        if boss_sk.profiles.count > 0:
+            ei = extrudes.createInput(
+                boss_sk.profiles.item(0),
+                adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
+            )
+            ei.setSymmetricExtent(
+                adsk.core.ValueInput.createByReal(COLLAR_LEN), True)
+            boss_feat = extrudes.add(ei)
 
-            if boss_sk.profiles.count > 0:
-                boss_prof = boss_sk.profiles.item(0)
-                ei = extrudes.createInput(
-                    boss_prof,
-                    adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
-                )
-                ei.setDistanceExtent(
-                    False, adsk.core.ValueInput.createByReal(ext_dist)
-                )
-                boss_feat = extrudes.add(ei)
-                if boss_feat.bodies.count > 0:
-                    boss_body = boss_feat.bodies.item(0)
-                    tc = adsk.core.ObjectCollection.create()
-                    tc.add(boss_body)
-                    ji = root.features.combineFeatures.createInput(body, tc)
-                    ji.operation        = adsk.fusion.FeatureOperations.JoinFeatureOperation
-                    ji.isKeepToolBodies = False
-                    root.features.combineFeatures.add(ji)
+            # ── Step 2: Split boss at cut_plane → two halves ──────────────
+            # Each half lands naturally on the correct side — no direction
+            # inference needed for the split.
+            if boss_feat.bodies.count > 0:
+                boss_body = boss_feat.bodies.item(0)
+                split_feats = root.features.splitBodyFeatures
+                split_input = split_feats.createInput(boss_body, cut_plane, False)
+                split_feat  = split_feats.add(split_input)
+                boss_halves = [split_feat.bodies.item(i)
+                               for i in range(split_feat.bodies.count)]
 
-            boss_sk.isLightBulbOn = False
+    except Exception as e:
+        if boss_sk is not None:
+            try: boss_sk.isLightBulbOn = False
+            except Exception: pass
+        if ui:
+            ui.messageBox(f'RetainBoss create/split failed (jct {joint_num}):\n'
+                          f'{e}\n{traceback.format_exc()}')
+
+    # ── Step 3: Match each half to its track body and join ────────────────
+    # Boss half CoMs are ±COLLAR_LEN/2 from cut plane → sign is unambiguous.
+    # Track body side is determined from junction face outward normal, which is
+    # body-topology-aware (evaluator.getNormalAtPoint), reliable even at hairpins.
+    used_halves = set()
+    for body, jct_face in track_pairs:
+        try:
+            if not boss_halves or jct_face is None:
+                continue
+
+            ok_n, fn = jct_face.evaluator.getNormalAtPoint(jct_face.pointOnFace)
+            if not ok_n:
+                fn = jct_face.geometry.normal
+            # fn is outward from body → body occupies the OPPOSITE side from fn
+            fn_dot = (fn.x * cut_normal.x +
+                      fn.y * cut_normal.y +
+                      fn.z * cut_normal.z)
+            track_side = -1 if fn_dot > 0 else +1
+
+            for i, half in enumerate(boss_halves):
+                if i in used_halves:
+                    continue
+                com = half.physicalProperties.centerOfMass
+                half_dot = ((com.x - cut_origin.x) * cut_normal.x +
+                            (com.y - cut_origin.y) * cut_normal.y +
+                            (com.z - cut_origin.z) * cut_normal.z)
+                half_side = +1 if half_dot >= 0 else -1
+                if half_side == track_side:
+                    tools_oc = adsk.core.ObjectCollection.create()
+                    tools_oc.add(half)
+                    ci = root.features.combineFeatures.createInput(body, tools_oc)
+                    ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+                    root.features.combineFeatures.add(ci)
+                    used_halves.add(i)
+                    break
+
         except Exception as e:
             if ui:
-                ui.messageBox(f'RetainBoss failed (jct {joint_num}, body {body.name}):\n'
+                ui.messageBox(f'RetainBoss join failed (jct {joint_num}, {body.name}):\n'
                               f'{e}\n{traceback.format_exc()}')
 
-        # ── Step 2: Socket cut (cuts through floor + bottom of boss) ──────────
+    # ── Step 4: Bore cut (per body) ───────────────────────────────────────
+    # Full-circle bore at mid-collar height → above the socket neck profile,
+    # in solid collar material.  setSymmetricExtent + participantBodies avoids
+    # any direction detection (same proven pattern as socket cuts).
+    # Two assembled pieces form a coaxial 8 mm bore for an M2 self-tapping screw.
+    for body_idx, body in enumerate(track_bodies):
+        bore_sk = None
+        try:
+            bore_sk = root.sketches.add(cut_plane)
+            bore_sk.name = f'Bore_{joint_num}_{body_idx}'
+            bore_inv = bore_sk.transform.copy()
+            bore_inv.invert()
+
+            fp_bore = floor_w.copy()
+            fp_bore.transformBy(bore_inv)
+            bore_cx = fp_bore.x
+            bore_cy = fp_bore.y + inward_b * (COLLAR_H / 2.0)
+
+            bore_sk.sketchCurves.sketchCircles.addByCenterRadius(
+                adsk.core.Point3D.create(bore_cx, bore_cy, 0),
+                BORE_R,
+            )
+            bore_sk.isLightBulbOn = False
+
+            if bore_sk.profiles.count > 0:
+                ei = extrudes.createInput(
+                    bore_sk.profiles.item(0),
+                    adsk.fusion.FeatureOperations.CutFeatureOperation,
+                )
+                ei.setSymmetricExtent(
+                    adsk.core.ValueInput.createByReal(BORE_DEPTH), True)
+                ei.participantBodies = [body]
+                extrudes.add(ei)
+
+        except Exception as e:
+            if bore_sk is not None:
+                try: bore_sk.isLightBulbOn = False
+                except Exception: pass
+            if ui:
+                ui.messageBox(f'Bore cut failed (jct {joint_num}, {body.name}):\n'
+                              f'{e}\n{traceback.format_exc()}')
+
+    # Phase 3: socket cuts (after collars are joined — cuts through collar base too)
+    for body_idx, body in enumerate(track_bodies):
         try:
             _, sock_prof = _key_profile(
                 f'Socket_{joint_num}_{body_idx}',
@@ -1352,9 +1432,8 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                 ui.messageBox(f'Socket cut failed (jct {joint_num}, body {body.name}):\n'
                               f'{e}\n{traceback.format_exc()}')
 
-    # ── H-key body — created ONCE, shared across all junctions ───────────────
-    # Clean cross body only — no collar.  Boss retention is on the track pieces.
-    key_exists = any(b.name == 'Connector_Key' for b in root.bRepBodies)
+    # ── H-key body — one per junction, no collar (collar is on the track pieces) ─
+    key_exists = any(b.name == f'Connector_Key_{joint_num}' for b in root.bRepBodies)
     if not key_exists:
         try:
             _, key_prof = _key_profile(
@@ -1372,7 +1451,7 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                 )
                 feat = extrudes.add(ei)
                 if feat.bodies.count > 0:
-                    feat.bodies.item(0).name = 'Connector_Key'
+                    feat.bodies.item(0).name = f'Connector_Key_{joint_num}'
         except Exception as e:
             if ui:
                 ui.messageBox(f'Connector_Key creation failed (jct {joint_num}):\n'
