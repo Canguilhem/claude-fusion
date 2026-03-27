@@ -1132,10 +1132,10 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     # Acts as assembly stop + covers junction gap.  Protrudes into channel
     # (wall-hidden side) so invisible when track is mounted.
     COLLAR_HW  = inner_hw - 0.03      # slightly narrower than inner channel
-    COLLAR_H   = 0.40                 # 4.0 mm tall above inner floor — bore fits at mid-height
+    COLLAR_H   = 0.40                 # 4.0 mm tall above inner floor
     COLLAR_LEN = 0.40                 # 4 mm per piece
-    BORE_R     = 0.080                # 1.6 mm diameter — M2 tap drill size
-    BORE_DEPTH = 0.40                 # 4 mm per piece (8 mm total when assembled)
+    POST_R     = 0.10                 # 1.0 mm radius — M2 nut fits over assembled full cylinder
+    POST_H     = 0.30                 # 3 mm above collar top
 
     # ── Orientation ──────────────────────────────────────────────────────────
     detect_sk = root.sketches.add(cut_plane)
@@ -1362,47 +1362,157 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                 ui.messageBox(f'RetainBoss join failed (jct {joint_num}, {body.name}):\n'
                               f'{e}\n{traceback.format_exc()}')
 
-    # ── Step 4: Bore cut (per body) ───────────────────────────────────────
-    # Full-circle bore at mid-collar height → above the socket neck profile,
-    # in solid collar material.  setSymmetricExtent + participantBodies avoids
-    # any direction detection (same proven pattern as socket cuts).
-    # Two assembled pieces form a coaxial 8 mm bore for an M2 self-tapping screw.
-    for body_idx, body in enumerate(track_bodies):
-        bore_sk = None
-        try:
-            bore_sk = root.sketches.add(cut_plane)
-            bore_sk.name = f'Bore_{joint_num}_{body_idx}'
-            bore_inv = bore_sk.transform.copy()
-            bore_inv.invert()
+    # ── Step 4: Half-stud posts on collar top ─────────────────────────────────
+    # D-shaped (half-cylinder) posts protrude from the collar top face into
+    # the channel.  Flat face sits at the junction seam; arc faces toward the
+    # piece.  When two assembled pieces mate, each pair of D-halves forms one
+    # full M2 cylinder.  Thread an M2 hex nut from the open channel to lock.
+    #
+    # We sketch directly on the collar_top BRepFace (found by face search after
+    # Step 3 join).  All 4 sketches are created in Phase A before any extrude
+    # to avoid face-staleness after CombineFeatures.
+    try:
+        iy = _iyw
+        cn = cut_normal
 
-            fp_bore = floor_w.copy()
-            fp_bore.transformBy(bore_inv)
-            bore_cx = fp_bore.x
-            bore_cy = fp_bore.y + inward_b * (COLLAR_H / 2.0)
+        # across_track = cn × iy  (unit vector spanning the channel width)
+        at_x = cn.y * iy.z - cn.z * iy.y
+        at_y = cn.z * iy.x - cn.x * iy.z
+        at_z = cn.x * iy.y - cn.y * iy.x
+        at_len = (at_x**2 + at_y**2 + at_z**2) ** 0.5
+        if at_len < 1e-6:
+            raise ValueError('across_track degenerate')
+        at_x /= at_len; at_y /= at_len; at_z /= at_len
 
-            bore_sk.sketchCurves.sketchCircles.addByCenterRadius(
-                adsk.core.Point3D.create(bore_cx, bore_cy, 0),
-                BORE_R,
-            )
-            bore_sk.isLightBulbOn = False
+        # ── Find collar top face on first available body ──────────────────
+        # Normal must be roughly parallel to _iyw; height from cut_origin
+        # along _iyw must be ≈ wt + COLLAR_H.
+        target_h = wt + COLLAR_H
+        collar_top_face = None
+        if boss_halves:
+            for body, _ in track_pairs:
+                best_f, best_e = None, 1e9
+                for face in body.faces:
+                    try:
+                        g = face.geometry
+                        if not isinstance(g, adsk.core.Plane):
+                            continue
+                        fn = g.normal
+                        # abs() covers both ±_iyw face orientations
+                        dot_n = abs(fn.x*iy.x + fn.y*iy.y + fn.z*iy.z)
+                        if dot_n < 0.95:
+                            continue
+                        pt = face.pointOnFace
+                        h = ((pt.x - cut_origin.x) * iy.x +
+                             (pt.y - cut_origin.y) * iy.y +
+                             (pt.z - cut_origin.z) * iy.z)
+                        e = abs(h - target_h)
+                        if e < best_e:
+                            best_e = e; best_f = face
+                    except Exception:
+                        continue
+                if best_f is not None and best_e < 0.05:
+                    collar_top_face = best_f
+                    break
 
-            if bore_sk.profiles.count > 0:
-                ei = extrudes.createInput(
-                    bore_sk.profiles.item(0),
-                    adsk.fusion.FeatureOperations.CutFeatureOperation,
-                )
-                ei.setSymmetricExtent(
-                    adsk.core.ValueInput.createByReal(BORE_DEPTH), True)
-                ei.participantBodies = [body]
-                extrudes.add(ei)
-
-        except Exception as e:
-            if bore_sk is not None:
-                try: bore_sk.isLightBulbOn = False
-                except Exception: pass
+        if collar_top_face is None:
             if ui:
-                ui.messageBox(f'Bore cut failed (jct {joint_num}, {body.name}):\n'
-                              f'{e}\n{traceback.format_exc()}')
+                ui.messageBox(f'HalfStud jct {joint_num}: collar top face not found '
+                              f'(target_h={target_h:.3f}) — skipping studs')
+        else:
+            stud_x = NECK_HW + 0.02 + POST_R  # clear neck edge by 0.2 mm
+
+            # Collar top world-space centre (used to find sketch origin)
+            ct_w = adsk.core.Point3D.create(
+                floor_w.x + iy.x * COLLAR_H,
+                floor_w.y + iy.y * COLLAR_H,
+                floor_w.z + iy.z * COLLAR_H,
+            )
+
+            # ── Phase A: all D-shape sketches before any extrude/join ────
+            # Get sketch coordinate system from the very first sketch created
+            # on collar_top_face so we can express directions correctly.
+            stud_pending = []
+            sk_inv = None
+            at_sk_x = at_sk_y = 0.0
+            cn_sk_x = cn_sk_y = 0.0
+            ct_sx  = ct_sy  = 0.0
+
+            for body_idx, (body, jct_face) in enumerate(track_pairs):
+                ok_n, fn = jct_face.evaluator.getNormalAtPoint(jct_face.pointOnFace)
+                if not ok_n:
+                    fn = jct_face.geometry.normal
+                fn_dot = fn.x * cn.x + fn.y * cn.y + fn.z * cn.z
+                piece_sign = -1 if fn_dot > 0 else +1
+
+                for si, x_sign in enumerate([0]):
+                    sk = root.sketches.add(collar_top_face)
+                    sk.name = f'HalfStud_{joint_num}_{body_idx}_{si}'
+
+                    # Capture coordinate system from the first sketch
+                    if sk_inv is None:
+                        sk_tr = sk.transform
+                        sk_inv = sk_tr.copy(); sk_inv.invert()
+                        xi = (sk_tr.getCell(0,0), sk_tr.getCell(1,0), sk_tr.getCell(2,0))
+                        yi = (sk_tr.getCell(0,1), sk_tr.getCell(1,1), sk_tr.getCell(2,1))
+                        # across_track in sketch coords
+                        at_sk_x = at_x*xi[0]+at_y*xi[1]+at_z*xi[2]
+                        at_sk_y = at_x*yi[0]+at_y*yi[1]+at_z*yi[2]
+                        # cut_normal in sketch coords
+                        cn_sk_x = cn.x*xi[0]+cn.y*xi[1]+cn.z*xi[2]
+                        cn_sk_y = cn.x*yi[0]+cn.y*yi[1]+cn.z*yi[2]
+                        ct_pt = ct_w.copy(); ct_pt.transformBy(sk_inv)
+                        ct_sx, ct_sy = ct_pt.x, ct_pt.y
+
+                    # Stud centre in sketch
+                    cx = ct_sx + x_sign * stud_x * at_sk_x
+                    cy = ct_sy + x_sign * stud_x * at_sk_y
+                    # D endpoints along across_track (flat face = diameter)
+                    p_s = (cx - POST_R * at_sk_x, cy - POST_R * at_sk_y)
+                    p_e = (cx + POST_R * at_sk_x, cy + POST_R * at_sk_y)
+                    # Arc midpoint: toward this piece (along ±cut_normal)
+                    p_m = (cx + piece_sign * POST_R * cn_sk_x,
+                           cy + piece_sign * POST_R * cn_sk_y)
+
+                    L = sk.sketchCurves.sketchLines
+                    A = sk.sketchCurves.sketchArcs
+                    L.addByTwoPoints(
+                        adsk.core.Point3D.create(p_s[0], p_s[1], 0),
+                        adsk.core.Point3D.create(p_e[0], p_e[1], 0),
+                    )
+                    A.addByThreePoints(
+                        adsk.core.Point3D.create(p_s[0], p_s[1], 0),
+                        adsk.core.Point3D.create(p_m[0], p_m[1], 0),
+                        adsk.core.Point3D.create(p_e[0], p_e[1], 0),
+                    )
+                    sk.isLightBulbOn = False
+
+                    if sk.profiles.count > 0:
+                        stud_pending.append((body, sk.profiles.item(0)))
+
+            # ── Phase B: extrude + join ───────────────────────────────────
+            # isPositiveDirection=True → extrude along +face_normal = +_iyw
+            # (away from collar body, further into channel).
+            for body, prof in stud_pending:
+                ei = extrudes.createInput(
+                    prof,
+                    adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
+                )
+                ei.setDistanceExtent(
+                    True, adsk.core.ValueInput.createByReal(POST_H))
+                stud_feat = extrudes.add(ei)
+                if stud_feat.bodies.count > 0:
+                    stud_body = stud_feat.bodies.item(0)
+                    tools_oc = adsk.core.ObjectCollection.create()
+                    tools_oc.add(stud_body)
+                    ci = root.features.combineFeatures.createInput(body, tools_oc)
+                    ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+                    root.features.combineFeatures.add(ci)
+
+    except Exception as e:
+        if ui:
+            ui.messageBox(f'HalfStud failed (jct {joint_num}):\n'
+                          f'{e}\n{traceback.format_exc()}')
 
     # Phase 3: socket cuts (after collars are joined — cuts through collar base too)
     for body_idx, body in enumerate(track_bodies):
