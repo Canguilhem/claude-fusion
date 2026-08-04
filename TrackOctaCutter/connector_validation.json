@@ -1,0 +1,905 @@
+{
+  "written": "2026-08-04T13:36:15.712795",
+  "junctions": [
+    {
+      "joint_num": 1,
+      "is_lower_pos": true,
+      "bore_cx": null,
+      "bore_cy": null,
+      "collar": {
+        "success": false,
+        "bodies_created": 0,
+        "error": null
+      },
+      "vbore": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "nuttrap": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "wallsnap": {
+        "male_idx": 1,
+        "female_idx": 0,
+        "walls": [
+          {
+            "wall": "R",
+            "method": "loft",
+            "pocket_removed": 0.15822,
+            "window_removed": 0.00984,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                17.2634,
+                -31.0992,
+                0.0,
+                40.5217,
+                -23.7604,
+                1.7
+              ]
+            }
+          },
+          {
+            "wall": "L",
+            "method": "loft",
+            "pocket_removed": 0.21385,
+            "window_removed": 0.03014,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                17.2634,
+                -31.1053,
+                0.0,
+                40.5217,
+                -23.7604,
+                1.7
+              ]
+            }
+          }
+        ],
+        "male_com": [
+          29.401,
+          -27.138,
+          0.646
+        ],
+        "female_com": [
+          7.85,
+          -30.944,
+          0.643
+        ],
+        "path_diag": {
+          "have_path": true,
+          "num_pieces": 10,
+          "r_i": 0.1,
+          "path_origin": [
+            18.561,
+            -30.114,
+            0.0
+          ],
+          "origin_err": 0.0,
+          "female_ratio_sign": -1,
+          "dr_lap": 0.005255
+        }
+      },
+      "volumes": {
+        "collar_vol": null,
+        "boss_before": null,
+        "boss_after": null,
+        "bore_removed": null,
+        "bore_expected": 0.0273,
+        "nut_before": null,
+        "nut_after": null,
+        "trap_removed": null,
+        "trap_expected": 0.0671
+      },
+      "success": true
+    },
+    {
+      "joint_num": 2,
+      "is_lower_pos": false,
+      "bore_cx": null,
+      "bore_cy": null,
+      "collar": {
+        "success": false,
+        "bodies_created": 0,
+        "error": null
+      },
+      "vbore": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "nuttrap": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "wallsnap": {
+        "male_idx": 1,
+        "female_idx": 0,
+        "walls": [
+          {
+            "wall": "R",
+            "method": "loft",
+            "pocket_removed": 0.20178,
+            "window_removed": 0.02678,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                38.7518,
+                -42.2908,
+                0.0,
+                57.0897,
+                -25.5126,
+                1.7
+              ]
+            }
+          },
+          {
+            "wall": "L",
+            "method": "loft",
+            "pocket_removed": 0.21436,
+            "window_removed": 0.02803,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                38.7518,
+                -42.2908,
+                0.0,
+                57.0897,
+                -25.2625,
+                1.7
+              ]
+            }
+          }
+        ],
+        "male_com": [
+          48.193,
+          -34.247,
+          0.646
+        ],
+        "female_com": [
+          29.271,
+          -27.173,
+          0.648
+        ],
+        "path_diag": {
+          "have_path": true,
+          "num_pieces": 10,
+          "r_i": 0.2,
+          "path_origin": [
+            40.139,
+            -26.436,
+            0.0
+          ],
+          "origin_err": 0.0,
+          "female_ratio_sign": -1,
+          "dr_lap": 0.005255
+        }
+      },
+      "volumes": {
+        "collar_vol": null,
+        "boss_before": null,
+        "boss_after": null,
+        "bore_removed": null,
+        "bore_expected": 0.0273,
+        "nut_before": null,
+        "nut_after": null,
+        "trap_removed": null,
+        "trap_expected": 0.0671
+      },
+      "success": true
+    },
+    {
+      "joint_num": 3,
+      "is_lower_pos": true,
+      "bore_cx": null,
+      "bore_cy": null,
+      "collar": {
+        "success": false,
+        "bodies_created": 0,
+        "error": null
+      },
+      "vbore": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "nuttrap": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "wallsnap": {
+        "male_idx": 1,
+        "female_idx": 0,
+        "walls": [
+          {
+            "wall": "R",
+            "method": "loft",
+            "pocket_removed": 0.19918,
+            "window_removed": 0.02588,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                55.7576,
+                -42.8141,
+                0.0,
+                65.4635,
+                -27.8468,
+                1.7
+              ]
+            }
+          },
+          {
+            "wall": "L",
+            "method": "loft",
+            "pocket_removed": 0.22205,
+            "window_removed": 0.02888,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                55.3741,
+                -42.8141,
+                0.0,
+                65.4635,
+                -27.8468,
+                1.7
+              ]
+            }
+          }
+        ],
+        "male_com": [
+          60.733,
+          -36.041,
+          0.646
+        ],
+        "female_com": [
+          48.095,
+          -34.156,
+          0.648
+        ],
+        "path_diag": {
+          "have_path": true,
+          "num_pieces": 10,
+          "r_i": 0.3,
+          "path_origin": [
+            56.801,
+            -41.328,
+            0.0
+          ],
+          "origin_err": 0.0,
+          "female_ratio_sign": -1,
+          "dr_lap": 0.005255
+        }
+      },
+      "volumes": {
+        "collar_vol": null,
+        "boss_before": null,
+        "boss_after": null,
+        "bore_removed": null,
+        "bore_expected": 0.0273,
+        "nut_before": null,
+        "nut_after": null,
+        "trap_removed": null,
+        "trap_expected": 0.0671
+      },
+      "success": true
+    },
+    {
+      "joint_num": 4,
+      "is_lower_pos": false,
+      "bore_cx": null,
+      "bore_cy": null,
+      "collar": {
+        "success": false,
+        "bodies_created": 0,
+        "error": null
+      },
+      "vbore": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "nuttrap": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "wallsnap": {
+        "male_idx": 1,
+        "female_idx": 0,
+        "walls": [
+          {
+            "wall": "R",
+            "method": "loft",
+            "pocket_removed": 0.28086,
+            "window_removed": 0.03515,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                41.6057,
+                -29.5073,
+                0.0,
+                58.5767,
+                -15.1388,
+                1.7
+              ]
+            }
+          },
+          {
+            "wall": "L",
+            "method": "loft",
+            "pocket_removed": 0.13876,
+            "window_removed": 0.01697,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                41.6057,
+                -29.5073,
+                0.0,
+                58.5767,
+                -15.1388,
+                1.7
+              ]
+            }
+          }
+        ],
+        "male_com": [
+          49.768,
+          -22.138,
+          0.646
+        ],
+        "female_com": [
+          60.681,
+          -36.1,
+          0.648
+        ],
+        "path_diag": {
+          "have_path": true,
+          "num_pieces": 10,
+          "r_i": 0.4,
+          "path_origin": [
+            57.11,
+            -28.347,
+            0.0
+          ],
+          "origin_err": 0.0,
+          "female_ratio_sign": -1,
+          "dr_lap": 0.005255
+        }
+      },
+      "volumes": {
+        "collar_vol": null,
+        "boss_before": null,
+        "boss_after": null,
+        "bore_removed": null,
+        "bore_expected": 0.0273,
+        "nut_before": null,
+        "nut_after": null,
+        "trap_removed": null,
+        "trap_expected": 0.0671
+      },
+      "success": true
+    },
+    {
+      "joint_num": 5,
+      "is_lower_pos": true,
+      "bore_cx": null,
+      "bore_cy": null,
+      "collar": {
+        "success": false,
+        "bodies_created": 0,
+        "error": null
+      },
+      "vbore": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "nuttrap": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "wallsnap": {
+        "male_idx": 1,
+        "female_idx": 0,
+        "walls": [
+          {
+            "wall": "R",
+            "method": "loft",
+            "pocket_removed": 0.19274,
+            "window_removed": 0.02623,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                41.624,
+                -16.3789,
+                0.0,
+                62.6127,
+                -6.7653,
+                1.7
+              ]
+            }
+          },
+          {
+            "wall": "L",
+            "method": "loft",
+            "pocket_removed": 0.2234,
+            "window_removed": 0.02856,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                41.624,
+                -16.4568,
+                0.0,
+                62.6127,
+                -6.7653,
+                1.7
+              ]
+            }
+          }
+        ],
+        "male_com": [
+          52.125,
+          -10.552,
+          0.646
+        ],
+        "female_com": [
+          49.846,
+          -22.214,
+          0.648
+        ],
+        "path_diag": {
+          "have_path": true,
+          "num_pieces": 10,
+          "r_i": 0.5,
+          "path_origin": [
+            42.621,
+            -15.216,
+            0.0
+          ],
+          "origin_err": 0.0,
+          "female_ratio_sign": -1,
+          "dr_lap": 0.005255
+        }
+      },
+      "volumes": {
+        "collar_vol": null,
+        "boss_before": null,
+        "boss_after": null,
+        "bore_removed": null,
+        "bore_expected": 0.0273,
+        "nut_before": null,
+        "nut_after": null,
+        "trap_removed": null,
+        "trap_expected": 0.0671
+      },
+      "success": true
+    },
+    {
+      "joint_num": 6,
+      "is_lower_pos": false,
+      "bore_cx": null,
+      "bore_cy": null,
+      "collar": {
+        "success": false,
+        "bodies_created": 0,
+        "error": null
+      },
+      "vbore": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "nuttrap": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "wallsnap": {
+        "male_idx": 1,
+        "female_idx": 0,
+        "walls": [
+          {
+            "wall": "R",
+            "method": "loft",
+            "pocket_removed": 0.19691,
+            "window_removed": 0.02646,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                52.6597,
+                -13.1471,
+                0.0,
+                66.786,
+                -0.0722,
+                1.7
+              ]
+            }
+          },
+          {
+            "wall": "L",
+            "method": "loft",
+            "pocket_removed": 0.21924,
+            "window_removed": 0.02834,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                52.6597,
+                -13.1471,
+                0.0,
+                66.786,
+                -0.0722,
+                1.7
+              ]
+            }
+          }
+        ],
+        "male_com": [
+          61.205,
+          -6.079,
+          0.646
+        ],
+        "female_com": [
+          52.016,
+          -10.612,
+          0.648
+        ],
+        "path_diag": {
+          "have_path": true,
+          "num_pieces": 10,
+          "r_i": 0.6,
+          "path_origin": [
+            61.859,
+            -10.602,
+            0.0
+          ],
+          "origin_err": 0.0,
+          "female_ratio_sign": -1,
+          "dr_lap": 0.005255
+        }
+      },
+      "volumes": {
+        "collar_vol": null,
+        "boss_before": null,
+        "boss_after": null,
+        "bore_removed": null,
+        "bore_expected": 0.0273,
+        "nut_before": null,
+        "nut_after": null,
+        "trap_removed": null,
+        "trap_expected": 0.0671
+      },
+      "success": true
+    },
+    {
+      "joint_num": 7,
+      "is_lower_pos": true,
+      "bore_cx": null,
+      "bore_cy": null,
+      "collar": {
+        "success": false,
+        "bodies_created": 0,
+        "error": null
+      },
+      "vbore": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "nuttrap": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "wallsnap": {
+        "male_idx": 1,
+        "female_idx": 0,
+        "walls": [
+          {
+            "wall": "R",
+            "method": "loft",
+            "pocket_removed": 0.12194,
+            "window_removed": 0.02314,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                31.7835,
+                -8.7881,
+                0.0,
+                54.087,
+                0.4224,
+                1.7
+              ]
+            }
+          },
+          {
+            "wall": "L",
+            "method": "loft",
+            "pocket_removed": 0.29137,
+            "window_removed": 0.03118,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                31.7835,
+                -8.7881,
+                0.0,
+                54.4445,
+                0.4224,
+                1.7
+              ]
+            }
+          }
+        ],
+        "male_com": [
+          42.752,
+          -3.743,
+          0.646
+        ],
+        "female_com": [
+          61.208,
+          -6.125,
+          0.648
+        ],
+        "path_diag": {
+          "have_path": true,
+          "num_pieces": 10,
+          "r_i": 0.7,
+          "path_origin": [
+            53.076,
+            -2.04,
+            0.0
+          ],
+          "origin_err": 0.0,
+          "female_ratio_sign": -1,
+          "dr_lap": 0.005255
+        }
+      },
+      "volumes": {
+        "collar_vol": null,
+        "boss_before": null,
+        "boss_after": null,
+        "bore_removed": null,
+        "bore_expected": 0.0273,
+        "nut_before": null,
+        "nut_after": null,
+        "trap_removed": null,
+        "trap_expected": 0.0671
+      },
+      "success": true
+    },
+    {
+      "joint_num": 8,
+      "is_lower_pos": false,
+      "bore_cx": null,
+      "bore_cy": null,
+      "collar": {
+        "success": false,
+        "bodies_created": 0,
+        "error": null
+      },
+      "vbore": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "nuttrap": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "wallsnap": {
+        "male_idx": 1,
+        "female_idx": 0,
+        "walls": [
+          {
+            "wall": "R",
+            "method": "loft",
+            "pocket_removed": 0.20777,
+            "window_removed": 0.02738,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                12.1069,
+                -20.1048,
+                0.0,
+                33.5832,
+                -6.9366,
+                1.7
+              ]
+            }
+          },
+          {
+            "wall": "L",
+            "method": "loft",
+            "pocket_removed": 0.20838,
+            "window_removed": 0.02745,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                12.1069,
+                -20.1048,
+                0.0,
+                33.5832,
+                -6.6648,
+                1.7
+              ]
+            }
+          }
+        ],
+        "male_com": [
+          22.262,
+          -13.383,
+          0.646
+        ],
+        "female_com": [
+          42.876,
+          -3.728,
+          0.648
+        ],
+        "path_diag": {
+          "have_path": true,
+          "num_pieces": 10,
+          "r_i": 0.8,
+          "path_origin": [
+            32.171,
+            -7.859,
+            0.0
+          ],
+          "origin_err": 0.0,
+          "female_ratio_sign": -1,
+          "dr_lap": 0.005255
+        }
+      },
+      "volumes": {
+        "collar_vol": null,
+        "boss_before": null,
+        "boss_after": null,
+        "bore_removed": null,
+        "bore_expected": 0.0273,
+        "nut_before": null,
+        "nut_after": null,
+        "trap_removed": null,
+        "trap_expected": 0.0671
+      },
+      "success": true
+    },
+    {
+      "joint_num": 9,
+      "is_lower_pos": true,
+      "bore_cx": null,
+      "bore_cy": null,
+      "collar": {
+        "success": false,
+        "bodies_created": 0,
+        "error": null
+      },
+      "vbore": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "nuttrap": {
+        "success": false,
+        "profile_found": false,
+        "error": null
+      },
+      "wallsnap": {
+        "male_idx": 0,
+        "female_idx": 1,
+        "walls": [
+          {
+            "wall": "R",
+            "method": "loft",
+            "pocket_removed": 0.17579,
+            "window_removed": 0.02205,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                -0.5044,
+                -39.9501,
+                0.0,
+                18.7328,
+                -19.092,
+                1.7
+              ]
+            }
+          },
+          {
+            "wall": "L",
+            "method": "loft",
+            "pocket_removed": 0.23764,
+            "window_removed": 0.03201,
+            "tongue_ok": true,
+            "barb_ok": true,
+            "error": null,
+            "diag": {
+              "tongue_bbox_world": [
+                -0.5044,
+                -39.9501,
+                0.0,
+                18.7328,
+                -18.1517,
+                1.7
+              ]
+            }
+          }
+        ],
+        "male_com": [
+          7.785,
+          -30.947,
+          0.641
+        ],
+        "female_com": [
+          22.381,
+          -13.318,
+          0.648
+        ],
+        "path_diag": {
+          "have_path": true,
+          "num_pieces": 10,
+          "r_i": 0.9,
+          "path_origin": [
+            13.011,
+            -19.677,
+            0.0
+          ],
+          "origin_err": 0.0,
+          "female_ratio_sign": -1,
+          "dr_lap": 0.005255
+        }
+      },
+      "volumes": {
+        "collar_vol": null,
+        "boss_before": null,
+        "boss_after": null,
+        "bore_removed": null,
+        "bore_expected": 0.0273,
+        "nut_before": null,
+        "nut_after": null,
+        "trap_removed": null,
+        "trap_expected": 0.0671
+      },
+      "success": true
+    }
+  ]
+}

@@ -1,0 +1,688 @@
+{
+  "written": "2026-08-04T13:38:48.736448",
+  "units": "cm (world XY; screw axis = +Z into wall)",
+  "screw_positions": [
+    [
+      20.6281,
+      -29.7461
+    ],
+    [
+      42.0168,
+      -27.37
+    ],
+    [
+      58.8528,
+      -41.7689
+    ],
+    [
+      57.5313,
+      -26.3374
+    ],
+    [
+      43.4302,
+      -13.3453
+    ],
+    [
+      63.4657,
+      -11.9353
+    ],
+    [
+      51.5089,
+      -0.6791
+    ],
+    [
+      30.2296,
+      -8.6595
+    ],
+    [
+      11.8806,
+      -21.4377
+    ]
+  ],
+  "mount_census": {
+    "pieces": [
+      {
+        "vol": 33.126,
+        "zmax": 2.15,
+        "studs": true
+      },
+      {
+        "vol": 33.114,
+        "zmax": 2.15,
+        "studs": true
+      },
+      {
+        "vol": 33.098,
+        "zmax": 2.15,
+        "studs": true
+      },
+      {
+        "vol": 33.138,
+        "zmax": 2.15,
+        "studs": true
+      },
+      {
+        "vol": 33.118,
+        "zmax": 2.15,
+        "studs": true
+      },
+      {
+        "vol": 33.12,
+        "zmax": 2.15,
+        "studs": true
+      },
+      {
+        "vol": 33.132,
+        "zmax": 2.15,
+        "studs": true
+      },
+      {
+        "vol": 65.18,
+        "zmax": 2.15,
+        "studs": true
+      },
+      {
+        "vol": 33.091,
+        "zmax": 2.15,
+        "studs": true
+      }
+    ],
+    "unmounted": 0
+  },
+  "brackets": [
+    {
+      "joint": 1,
+      "success": true,
+      "screws": [
+        [
+          20.6281,
+          -29.7461
+        ]
+      ],
+      "track_bodies": 2,
+      "th_param": 1.7,
+      "th_src": "global",
+      "th_measured": 1.7,
+      "origin_err": 0.0,
+      "method": "loft",
+      "master_vol": 0.249,
+      "foot_z": [
+        [
+          1.4,
+          2.15
+        ],
+        [
+          1.4,
+          2.15
+        ]
+      ],
+      "weld_dv": [
+        [
+          "R",
+          "WBHost_1",
+          0.1619,
+          0.249
+        ],
+        [
+          "L",
+          "WBHost_1",
+          0.159,
+          0.249
+        ]
+      ],
+      "welded_into": [
+        [
+          "R",
+          "WBHost_1"
+        ],
+        [
+          "L",
+          "WBHost_1"
+        ]
+      ],
+      "feet_ok": 2,
+      "welds_ok": 2,
+      "host_ztop": 2.15,
+      "leftover_bodies": [],
+      "host_restored": true,
+      "cut_origin": [
+        18.56,
+        -30.11,
+        0.0
+      ],
+      "iyw": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "joint": 2,
+      "success": true,
+      "screws": [
+        [
+          42.0168,
+          -27.37
+        ]
+      ],
+      "track_bodies": 2,
+      "th_param": 1.7,
+      "th_src": "global",
+      "th_measured": 1.7,
+      "origin_err": 0.0,
+      "method": "loft",
+      "master_vol": 0.249,
+      "foot_z": [
+        [
+          1.4,
+          2.15
+        ],
+        [
+          1.4,
+          2.15
+        ]
+      ],
+      "weld_dv": [
+        [
+          "R",
+          "WBHost_2",
+          0.159,
+          0.249
+        ],
+        [
+          "L",
+          "WBHost_2",
+          0.1612,
+          0.249
+        ]
+      ],
+      "welded_into": [
+        [
+          "R",
+          "WBHost_2"
+        ],
+        [
+          "L",
+          "WBHost_2"
+        ]
+      ],
+      "feet_ok": 2,
+      "welds_ok": 2,
+      "host_ztop": 2.15,
+      "leftover_bodies": [],
+      "host_restored": true,
+      "cut_origin": [
+        40.14,
+        -26.44,
+        0.0
+      ],
+      "iyw": [
+        -0.0,
+        -0.0,
+        1.0
+      ]
+    },
+    {
+      "joint": 3,
+      "success": true,
+      "screws": [
+        [
+          58.8528,
+          -41.7689
+        ]
+      ],
+      "track_bodies": 2,
+      "th_param": 1.7,
+      "th_src": "global",
+      "th_measured": 1.7,
+      "origin_err": 0.0,
+      "method": "loft",
+      "master_vol": 0.249,
+      "foot_z": [
+        [
+          1.4,
+          2.15
+        ],
+        [
+          1.4,
+          2.15
+        ]
+      ],
+      "weld_dv": [
+        [
+          "R",
+          "WBHost_3",
+          0.1616,
+          0.249
+        ],
+        [
+          "L",
+          "WBHost_3",
+          0.159,
+          0.249
+        ]
+      ],
+      "welded_into": [
+        [
+          "R",
+          "WBHost_3"
+        ],
+        [
+          "L",
+          "WBHost_3"
+        ]
+      ],
+      "feet_ok": 2,
+      "welds_ok": 2,
+      "host_ztop": 2.15,
+      "leftover_bodies": [],
+      "host_restored": true,
+      "cut_origin": [
+        56.8,
+        -41.33,
+        0.0
+      ],
+      "iyw": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "joint": 4,
+      "success": true,
+      "screws": [
+        [
+          57.5313,
+          -26.3374
+        ]
+      ],
+      "track_bodies": 2,
+      "th_param": 1.7,
+      "th_src": "global",
+      "th_measured": 1.7,
+      "origin_err": 0.0,
+      "method": "loft",
+      "master_vol": 0.249,
+      "foot_z": [
+        [
+          1.4,
+          2.15
+        ],
+        [
+          1.4,
+          2.15
+        ]
+      ],
+      "weld_dv": [
+        [
+          "R",
+          "WBHost_4",
+          0.1627,
+          0.249
+        ],
+        [
+          "L",
+          "WBHost_4",
+          0.1838,
+          0.249
+        ]
+      ],
+      "welded_into": [
+        [
+          "R",
+          "WBHost_4"
+        ],
+        [
+          "L",
+          "WBHost_4"
+        ]
+      ],
+      "feet_ok": 2,
+      "welds_ok": 2,
+      "host_ztop": 2.15,
+      "leftover_bodies": [],
+      "host_restored": true,
+      "cut_origin": [
+        57.11,
+        -28.35,
+        0.0
+      ],
+      "iyw": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "joint": 5,
+      "success": true,
+      "screws": [
+        [
+          43.4302,
+          -13.3453
+        ]
+      ],
+      "track_bodies": 2,
+      "th_param": 1.7,
+      "th_src": "global",
+      "th_measured": 1.7,
+      "origin_err": 0.0,
+      "method": "loft",
+      "master_vol": 0.249,
+      "foot_z": [
+        [
+          1.4,
+          2.15
+        ],
+        [
+          1.4,
+          2.15
+        ]
+      ],
+      "weld_dv": [
+        [
+          "R",
+          "WBHost_5",
+          0.1622,
+          0.249
+        ],
+        [
+          "L",
+          "WBHost_5",
+          0.1649,
+          0.249
+        ]
+      ],
+      "welded_into": [
+        [
+          "R",
+          "WBHost_5"
+        ],
+        [
+          "L",
+          "WBHost_5"
+        ]
+      ],
+      "feet_ok": 2,
+      "welds_ok": 2,
+      "host_ztop": 2.15,
+      "leftover_bodies": [],
+      "host_restored": true,
+      "cut_origin": [
+        42.62,
+        -15.22,
+        0.0
+      ],
+      "iyw": [
+        -0.0,
+        -0.0,
+        1.0
+      ]
+    },
+    {
+      "joint": 6,
+      "success": true,
+      "screws": [
+        [
+          63.4657,
+          -11.9353
+        ]
+      ],
+      "track_bodies": 2,
+      "th_param": 1.7,
+      "th_src": "global",
+      "th_measured": 1.7,
+      "origin_err": 0.0,
+      "method": "loft",
+      "master_vol": 0.249,
+      "foot_z": [
+        [
+          1.4,
+          2.15
+        ],
+        [
+          1.4,
+          2.15
+        ]
+      ],
+      "weld_dv": [
+        [
+          "R",
+          "WBHost_6",
+          0.1648,
+          0.249
+        ],
+        [
+          "L",
+          "WBHost_6",
+          0.1619,
+          0.249
+        ]
+      ],
+      "welded_into": [
+        [
+          "R",
+          "WBHost_6"
+        ],
+        [
+          "L",
+          "WBHost_6"
+        ]
+      ],
+      "feet_ok": 2,
+      "welds_ok": 2,
+      "host_ztop": 2.15,
+      "leftover_bodies": [],
+      "host_restored": true,
+      "cut_origin": [
+        61.86,
+        -10.6,
+        0.0
+      ],
+      "iyw": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "joint": 7,
+      "success": true,
+      "screws": [
+        [
+          51.5089,
+          -0.6791
+        ]
+      ],
+      "track_bodies": 2,
+      "th_param": 1.7,
+      "th_src": "global",
+      "th_measured": 1.7,
+      "origin_err": 0.0,
+      "method": "loft",
+      "master_vol": 0.249,
+      "foot_z": [
+        [
+          1.4,
+          2.15
+        ],
+        [
+          1.4,
+          2.15
+        ]
+      ],
+      "weld_dv": [
+        [
+          "R",
+          "WBHost_7",
+          0.1692,
+          0.249
+        ],
+        [
+          "L",
+          "WBHost_7",
+          0.1746,
+          0.249
+        ]
+      ],
+      "welded_into": [
+        [
+          "R",
+          "WBHost_7"
+        ],
+        [
+          "L",
+          "WBHost_7"
+        ]
+      ],
+      "feet_ok": 2,
+      "welds_ok": 2,
+      "host_ztop": 2.15,
+      "leftover_bodies": [],
+      "host_restored": true,
+      "cut_origin": [
+        53.08,
+        -2.04,
+        0.0
+      ],
+      "iyw": [
+        -0.0,
+        -0.0,
+        1.0
+      ]
+    },
+    {
+      "joint": 8,
+      "success": true,
+      "screws": [
+        [
+          30.2296,
+          -8.6595
+        ]
+      ],
+      "track_bodies": 2,
+      "th_param": 1.7,
+      "th_src": "global",
+      "th_measured": 1.7,
+      "origin_err": 0.0,
+      "method": "loft",
+      "master_vol": 0.249,
+      "foot_z": [
+        [
+          1.4,
+          2.15
+        ],
+        [
+          1.4,
+          2.15
+        ]
+      ],
+      "weld_dv": [
+        [
+          "R",
+          "WBHost_8",
+          0.1493,
+          0.249
+        ],
+        [
+          "L",
+          "WBHost_8",
+          0.159,
+          0.249
+        ]
+      ],
+      "welded_into": [
+        [
+          "R",
+          "WBHost_8"
+        ],
+        [
+          "L",
+          "WBHost_8"
+        ]
+      ],
+      "feet_ok": 2,
+      "welds_ok": 2,
+      "host_ztop": 2.15,
+      "leftover_bodies": [],
+      "host_restored": true,
+      "cut_origin": [
+        32.17,
+        -7.86,
+        0.0
+      ],
+      "iyw": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "joint": 9,
+      "success": true,
+      "screws": [
+        [
+          11.8806,
+          -21.4377
+        ]
+      ],
+      "track_bodies": 2,
+      "th_param": 1.7,
+      "th_src": "global",
+      "th_measured": 1.7,
+      "origin_err": 0.0,
+      "method": "loft",
+      "master_vol": 0.249,
+      "foot_z": [
+        [
+          1.4,
+          2.15
+        ],
+        [
+          1.4,
+          2.15
+        ]
+      ],
+      "weld_dv": [
+        [
+          "R",
+          "WBHost_9",
+          0.1682,
+          0.249
+        ],
+        [
+          "L",
+          "WBHost_9",
+          0.1604,
+          0.249
+        ]
+      ],
+      "welded_into": [
+        [
+          "R",
+          "WBHost_9"
+        ],
+        [
+          "L",
+          "WBHost_9"
+        ]
+      ],
+      "feet_ok": 2,
+      "welds_ok": 2,
+      "host_ztop": 2.15,
+      "leftover_bodies": [],
+      "host_restored": true,
+      "cut_origin": [
+        13.01,
+        -19.68,
+        0.0
+      ],
+      "iyw": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  ]
+}

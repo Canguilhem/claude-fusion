@@ -103,14 +103,17 @@ def run(context):
             place_cut_planes(root, ui, design, params)
         elif result == adsk.core.DialogResults.DialogNo:
             result2 = ui.messageBox(
-                'Phase 2: Cut track at CutPlane_* planes?\n\n'
-                'YES = Select body and cut at all CutPlane_* planes\n'
-                'NO = Show help and current parameters',
+                'Phase 2, or a wall-mount test part?\n\n'
+                'YES = Phase 2 (cut track at all CutPlane_* planes)\n'
+                'NO = Generate a WALL PLAQUE (the mount that hooks the studs)\n'
+                'CANCEL = Show help and current parameters',
                 'Track Octa Cutter',
-                adsk.core.MessageBoxButtonTypes.YesNoButtonType
+                adsk.core.MessageBoxButtonTypes.YesNoCancelButtonType
             )
             if result2 == adsk.core.DialogResults.DialogYes:
                 cut_at_planes(root, ui, design, params)
+            elif result2 == adsk.core.DialogResults.DialogNo:
+                create_wall_plaque_part(root, params, ui)
             else:
                 show_help(ui, params)
 
@@ -131,19 +134,19 @@ def show_help(ui, params):
         'Phase 2: Cut at Planes\n'
         '  1. Select the track body\n'
         '  2. Select the path sketch (for accurate piece ordering)\n'
-        '  3. All CutPlane_* planes are processed:\n'
-        '     - Body split at each plane\n'
-        '     - Clip_N bridge plate created at each junction\n'
-        '  Assembly:\n'
-        '   M2 plate: plate inside channel, 2\u00d7 M2 screws from channel side.\n'
-        '   H-key: identical sockets in both pieces, shared Connector_Key body.\n'
-        '     Slide key into piece A, push piece B onto protruding half.\n\n'
+        '  3. Choose connector: wall-snap (recommended) or M2 plate\n'
+        '  4. All CutPlane_* planes are processed\n\n'
+        'Assembly (wall-snap, approach B):\n'
+        '  Hardware per junction: NONE \u2014 integrated snap-fit joints\n'
+        '  1. Each piece has a male end (wall tongues) + a female end (pockets)\n'
+        '  2. Push two ends together until the side-wall barbs click in\n'
+        '  3. To separate: press the barb in through the wall-facing window\n'
+        '  Floor + channel stay clear for a continuous LED strip\n\n'
         '--- Current Parameters ---\n'
         f'TRACK_HEIGHT:   {params["TRACK_HEIGHT"]*10:.1f} mm\n'
         f'TRACK_WIDTH:    {params["TRACK_WIDTH"]*10:.1f} mm\n'
         f'WALL_THICKNESS: {params["WALL_THICKNESS"]*10:.1f} mm\n'
-        f'KEY_DEPTH:      {params["KEY_DEPTH"]*10:.1f} mm per side ({params["KEY_DEPTH"]*20:.0f} mm total plate length)\n'
-        f'FLOOR_HEIGHT:   {params["FLOOR_HEIGHT"]*10:.1f} mm (bridge plate thickness)\n\n'
+        f'KEY_DEPTH:      {params["KEY_DEPTH"]*10:.1f} mm\n\n'
         'Edit defaults in TrackOctaCutter.py constants at the top of the file.'
     )
 
@@ -215,6 +218,19 @@ def place_cut_planes(root, ui, design, params):
         )
         return
 
+    # Clear any CutPlane_* from a previous Phase 1 run — otherwise re-running
+    # ACCUMULATES planes (old + new), so Phase 2 splits into far more pieces than
+    # intended (the "way more pieces" bug).  Only script-created CutPlane_* are
+    # removed; user planes are untouched.
+    _removed_old = 0
+    for _i in range(root.constructionPlanes.count - 1, -1, -1):
+        _cp = root.constructionPlanes.item(_i)
+        if _cp.name.startswith('CutPlane_'):
+            try:
+                _cp.deleteMe(); _removed_old += 1
+            except Exception:
+                pass
+
     planes_created = 0
     for i in range(1, num_pieces):
         ratio = i / num_pieces
@@ -231,7 +247,9 @@ def place_cut_planes(root, ui, design, params):
     ui.messageBox(
         f'Phase 1 complete!\n\n'
         f'Track length: {total_length:.1f} cm\n'
-        f'{planes_created} cut planes created\n'
+        + (f'Removed {_removed_old} old CutPlane_* from a previous run\n'
+           if _removed_old else '')
+        + f'{planes_created} cut planes created\n'
         f'Expected pieces: {num_pieces} (~{total_length/num_pieces:.1f} cm each)\n\n'
         'Review the CutPlane_* planes in the browser.\n'
         'You can move or delete any plane before Phase 2.\n\n'
@@ -294,14 +312,14 @@ def cut_at_planes(root, ui, design, params):
     conn_choice = ui.messageBox(
         f'Found {num_cuts} cut planes.\n\n'
         f'Choose connector type:\n\n'
-        f'  YES  = M2 screw plate (current)\n'
+        f'  YES  = M2 screw plate\n'
         f'         Flat plate inside channel + 2\u00d7 M2 screws\n'
         f'         Requires: heat-set inserts + M2 screws\n'
         f'         Fully hidden inside channel (wall-facing side)\n\n'
-        f'  NO   = H-key (no hardware, approach B)\n'
-        f'         Identical socket cut in BOTH adjacent pieces\n'
-        f'         One shared Connector_Key body (print 1 per junction)\n'
-        f'         Slide key between pieces — fully hidden in floor\n\n'
+        f'  NO   = Wall-snap joint (wallsnap, approach B)\n'
+        f'         Cantilever snap-fit built into the side walls\n'
+        f'         No hardware, no glue — push pieces together until they click\n'
+        f'         Floor + channel stay clear for a continuous LED strip\n\n'
         f'  CANCEL = Abort',
         'Choose Connector',
         adsk.core.MessageBoxButtonTypes.YesNoCancelButtonType
@@ -323,7 +341,7 @@ def cut_at_planes(root, ui, design, params):
 
             min_piece_vol = 0.05
             track_candidates = []
-            for b in root.bRepBodies:
+            for b in _all_bodies(root):
                 if b.name.startswith('Track_') and b != split_surface:
                     try:
                         vol = b.physicalProperties.volume
@@ -341,17 +359,19 @@ def cut_at_planes(root, ui, design, params):
                     pass
                 continue
 
-            split_feats = root.features.splitBodyFeatures
             for target_body in track_bodies:
                 try:
+                    _tb_comp = target_body.parentComponent
+                    split_feats = _tb_comp.features.splitBodyFeatures
                     split_input = split_feats.createInput(target_body, split_surface, False)
                     split_result = split_feats.add(split_input)
                     for new_body in split_result.bodies:
                         new_body.name = 'Track_Piece'
                     cuts_made += 1
                     break
-                except:
-                    pass
+                except Exception as _e_split:
+                    if ui:
+                        ui.messageBox(f'Split {idx+1} body failed: {_e_split}')
 
             try:
                 split_surface.deleteMe()
@@ -392,7 +412,10 @@ def cut_at_planes(root, ui, design, params):
         adsk.doEvents()
         slivers = []
         tracks = []
-        for body in root.bRepBodies:
+        degenerate = []
+        # Use _all_bodies so subcomponent Track_ bodies are included —
+        # when the user chose "separate components", root.bRepBodies is empty.
+        for body in _all_bodies(root):
             if not body.name.startswith('Track_'):
                 continue
             try:
@@ -402,7 +425,23 @@ def cut_at_planes(root, ui, design, params):
                 else:
                     tracks.append(body)
             except:
-                pass
+                # physicalProperties.volume THROWS on a degenerate ~0.1 mm
+                # disk-thickness wafer left by the splitter.  The old code did
+                # `pass` here, so the wafer landed in neither list and survived
+                # to be numbered as a bogus piece (the Track_Piece_5 sleeve that
+                # made the joint loose).  Don't try to combine it — a corrupt tool
+                # body can damage a good piece — just remove it outright.
+                degenerate.append(body)
+
+        for _d in degenerate:
+            try:
+                _d.deleteMe()
+                slivers_removed += 1
+            except:
+                try:
+                    _d.name = 'Sliver_residual'
+                except:
+                    pass
 
         if not slivers:
             break
@@ -418,7 +457,8 @@ def cut_at_planes(root, ui, design, params):
                     bb_a.minPoint.y <= bb_b.maxPoint.y and bb_a.maxPoint.y >= bb_b.minPoint.y and
                     bb_a.minPoint.z <= bb_b.maxPoint.z and bb_a.maxPoint.z >= bb_b.minPoint.z):
                     try:
-                        combines = root.features.combineFeatures
+                        # Use track's own component to avoid cross-component combine failure.
+                        combines = track.parentComponent.features.combineFeatures
                         tc = adsk.core.ObjectCollection.create()
                         tc.add(sliver)
                         ci = combines.createInput(track, tc)
@@ -449,7 +489,7 @@ def cut_at_planes(root, ui, design, params):
                         except:
                             pass
                     if best_track is not None and best_dist < 5.0:
-                        combines = root.features.combineFeatures
+                        combines = best_track.parentComponent.features.combineFeatures
                         tc = adsk.core.ObjectCollection.create()
                         tc.add(sliver)
                         ci = combines.createInput(best_track, tc)
@@ -478,14 +518,48 @@ def cut_at_planes(root, ui, design, params):
         if not merged_any:
             break
 
+    # === Build the sweep path (for path-following wall-snap geometry) ===
+    # Rebuild the Path object + total length from the selected path sketch so the
+    # connector code can place geometry at true path stations (curve-following),
+    # not on straight prisms that drift off the wall on bends.  num_pieces matches
+    # Phase 1 (planes were placed at ratio i/num_pieces), so junction j sits at
+    # path ratio j/num_pieces.
+    _sweep_path = None
+    _path_len   = 0.0
+    _num_pieces = num_cuts + 1
+    if path_sketch_ref is not None:
+        try:
+            _pc = adsk.core.ObjectCollection.create()
+            for _curve in path_sketch_ref.sketchCurves:
+                _pc.add(_curve)
+                if hasattr(_curve, 'geometry'):
+                    _ev = _curve.geometry.evaluator
+                    _ok, _sp, _ep = _ev.getParameterExtents()
+                    if _ok:
+                        _ok2, _ln = _ev.getLengthAtParameter(_sp, _ep)
+                        if _ok2:
+                            _path_len += _ln
+            if _pc.count > 0:
+                _sweep_path = root.features.createPath(_pc, True)
+        except Exception as _e_path:
+            _sweep_path = None
+            if ui:
+                ui.messageBox(f'Path build for wall-snap failed (straight fallback):\n{_e_path}')
+
     # === STEP 2: Create connectors at each junction ===
     clips_made = 0
     clip_errors = []
+    _val_records = []
     for idx, cut_plane in enumerate(cut_planes):
         adsk.doEvents()
         try:
             if use_pin_connector:
-                ok = create_pin_connector(root, cut_plane, params, idx + 1, ui)
+                _rec = create_pin_connector(root, cut_plane, params, idx + 1, ui,
+                                            path=_sweep_path, path_len=_path_len,
+                                            num_pieces=_num_pieces)
+                ok = bool(_rec.get('success', False)) if isinstance(_rec, dict) else bool(_rec)
+                if isinstance(_rec, dict):
+                    _val_records.append(_rec)
             else:
                 ok = create_junction_clip(root, cut_plane, params, idx + 1, None, ui)
             if ok:
@@ -500,8 +574,244 @@ def cut_at_planes(root, ui, design, params):
             'Connector Debug'
         )
 
+    # Write validation JSON so geometry can be verified without screenshots.
+    if _val_records:
+        import json as _json, os as _os, datetime as _dt
+        _val_path = _os.path.join(_os.path.dirname(__file__), 'connector_validation.json')
+        try:
+            with open(_val_path, 'w') as _vf:
+                _json.dump({
+                    'written': _dt.datetime.now().isoformat(),
+                    'junctions': _val_records
+                }, _vf, indent=2)
+        except Exception as _ve:
+            if ui:
+                ui.messageBox(f'Validation write failed: {_ve}')
+
+    # === STEP 2.6: Wall-mount standoff feet (integrated, two per junction) ===
+    # Optional.  Built while bodies are still in ROOT (before any 'Create
+    # components' step) so the feet weld into the piece with no cross-component
+    # ownership issue.  Each foot is combined INTO a track piece (no standalone
+    # body); the host is temporarily renamed WBHost_N then restored to
+    # 'Track_Piece' so STEP 3's rename still catches it.  Orientation-free +
+    # self-locating (see create_wall_bracket) — works for any track/orientation.
+    wb_choice = ui.messageBox(
+        'Add wall-mount dovetail studs at each junction?\n\n'
+        'Two studs (one per wall) are grown on the wall-tip faces and welded\n'
+        'INTO the track piece — they print as part of it.  They sit on the\n'
+        'opaque walls (in shadow) and flare only OUTBOARD, so the LED channel\n'
+        'stays fully clear (no blocking, no shadow).\n\n'
+        'NO HOLES are cut in the track: a separate WallPlaque hooks both studs\n'
+        'and carries the single M3 into the wall, hidden behind the track.\n'
+        'Generate that plaque from the main menu (Phase 1? NO -> Phase 2? NO)\n'
+        'and print one per junction — they are all identical.\n\n'
+        'A 1:1 drilling template sketch is generated for the wall, but the\n'
+        'reliable install is: assemble the loop, clip the plaques on, THEN\n'
+        'mark and drill through them so no error accumulates.\n'
+        'v1 assumes a flat-XY track.',
+        'Wall Mounts',
+        adsk.core.MessageBoxButtonTypes.YesNoButtonType
+    )
+    if wb_choice == adsk.core.DialogResults.DialogYes:
+        _wb_records = []
+        _wb_made = 0
+        # Measure the wall-tip Z ONCE, before ANY foot exists — the max Z over all
+        # track pieces on this flat track is the (shared) wall tip.  Feet are
+        # welded junction-by-junction, so a per-junction host bbox gets
+        # CONTAMINATED by feet already welded in from neighbours (its top reads
+        # foot-top, not wall-tip) → later junctions build their feet higher and
+        # the heights diverge.  A single pre-measured constant keeps every foot
+        # at the same Z.
+        _wall_top_z = None
+        try:
+            _tops = [b.boundingBox.maxPoint.z for b in _all_bodies(root)
+                     if b.name.startswith('Track_')]
+            if _tops:
+                _wall_top_z = max(_tops)
+        except Exception:
+            _wall_top_z = None
+        for idx, cut_plane in enumerate(cut_planes):
+            adsk.doEvents()
+            try:
+                _wbr = create_wall_bracket(root, cut_plane, params, idx + 1, ui,
+                                           path=_sweep_path, path_len=_path_len,
+                                           num_pieces=_num_pieces,
+                                           wall_top_z=_wall_top_z)
+                if isinstance(_wbr, dict):
+                    _wb_records.append(_wbr)
+                    if _wbr.get('success'):
+                        _wb_made += 1
+            except Exception as _ewb:
+                _wb_records.append({'joint': idx + 1, 'success': False,
+                                    'error': str(_ewb)})
+        # Collect every screw XY (world) for the drilling template + JSON.
+        _wb_screws = []
+        for _r in _wb_records:
+            for _s in (_r.get('screws') or []):
+                _wb_screws.append(_s)
+
+        # Build a 1:1 drilling template sketch on xY: a circle at each screw
+        # position (the constellation the customer transfers to the wall in
+        # whatever orientation they choose).  Export it as DXF/PDF at 1:1.
+        _tpl_ok = False
+        try:
+            if _wb_screws:
+                _tpl = root.sketches.add(root.xYConstructionPlane)
+                _tpl.name = 'WallMount_DrillTemplate'
+                _tinv = _tpl.transform.copy(); _tinv.invert()
+                _circ = _tpl.sketchCurves.sketchCircles
+                _line = _tpl.sketchCurves.sketchLines
+                for _sx, _sy in _wb_screws:
+                    _c = adsk.core.Point3D.create(_sx, _sy, 0.0)
+                    _c.transformBy(_tinv)
+                    _cp = adsk.core.Point3D.create(_c.x, _c.y, 0)
+                    _circ.addByCenterRadius(_cp, 0.20)   # 4 mm drill-mark ring
+                    # small cross-hair for precise centre-punching
+                    _line.addByTwoPoints(
+                        adsk.core.Point3D.create(_c.x - 0.30, _c.y, 0),
+                        adsk.core.Point3D.create(_c.x + 0.30, _c.y, 0))
+                    _line.addByTwoPoints(
+                        adsk.core.Point3D.create(_c.x, _c.y - 0.30, 0),
+                        adsk.core.Point3D.create(_c.x, _c.y + 0.30, 0))
+                _tpl_ok = True
+        except Exception:
+            pass
+
+        # ── Mount census: does EVERY piece carry a pair of studs? ────────────
+        # A junction mounts its downstream piece, so on a closed loop the map
+        # should be 1:1.  When it isn't, one piece ends up with two pairs and
+        # another with NONE — and a piece with no mount hangs on its snap joints
+        # alone.  A studded piece reads max-Z = wall tip + NECK_H + FLARE; a bare
+        # one still reads the wall tip.  This is measured, so it catches a
+        # mis-placed pair no matter which code path put it there.
+        _wb_census = {'pieces': [], 'unmounted': 0}
+        try:
+            _stud_top = (_wall_top_z + 0.30) if _wall_top_z is not None else None
+            for _b in _all_bodies(root):
+                if not _b.name.startswith('Track_'):
+                    continue
+                try:
+                    _v = _b.physicalProperties.volume
+                    if _v < 0.05:
+                        continue
+                    _zt = _b.boundingBox.maxPoint.z
+                except Exception:
+                    continue
+                _has = (_stud_top is not None and _zt >= _stud_top)
+                _wb_census['pieces'].append(
+                    {'vol': round(_v, 3), 'zmax': round(_zt, 3),
+                     'studs': bool(_has)})
+                if not _has:
+                    _wb_census['unmounted'] += 1
+        except Exception:
+            pass
+        if _wb_census['unmounted'] and ui:
+            ui.messageBox(
+                f"{_wb_census['unmounted']} track piece(s) ended up with NO "
+                f"wall studs — they would hang on their snap joints alone.\n\n"
+                f"Another piece will have received two pairs.  See "
+                f"mount_census in wall_bracket_validation.json; the usual cause "
+                f"is a junction placing its studs on the wrong side of the seam.")
+
+        # Write bracket validation + screw coordinates JSON.
+        try:
+            import json as _json2, os as _os2, datetime as _dt2
+            _wb_path = _os2.path.join(_os2.path.dirname(__file__),
+                                      'wall_bracket_validation.json')
+            with open(_wb_path, 'w') as _wf:
+                _json2.dump({'written': _dt2.datetime.now().isoformat(),
+                             'units': 'cm (world XY; screw axis = +Z into wall)',
+                             'screw_positions': _wb_screws,
+                             'mount_census': _wb_census,
+                             'brackets': _wb_records}, _wf, indent=2)
+        except Exception:
+            pass
+        if ui:
+            _tpl_msg = ('A 1:1 drilling template sketch "WallMount_DrillTemplate" '
+                        'was created — export it as DXF/PDF at 1:1, tape it to the '
+                        'wall in whatever orientation you like, and mark the holes.'
+                        if _tpl_ok else
+                        'Screw positions are in wall_bracket_validation.json.')
+            ui.messageBox(
+                f'{_wb_made}/{len(cut_planes)} junctions got dovetail studs '
+                f'(2 per junction, {len(_wb_screws)} plaque screws).\n\n'
+                'Each stud is part of a track piece (wall-facing side, in the '
+                'wall\'s shadow — hidden from the viewer, clear of the LED).\n'
+                'Mount: print one WallPlaque per junction, hook it over both '
+                'studs, and drive its single M3 into a wall anchor.  The gap '
+                'is the plaque pillar (WALL_STANDOFF_GAP).\n\n'
+                f'{_tpl_msg}'
+            )
+
     # === STEP 3: Rename pieces ===
-    piece_bodies = [b for b in root.bRepBodies if b.name.startswith('Track_')]
+    # Safety net: never number a sub-threshold body as a piece.  Any Track_ body
+    # still under min-volume here is a splitter wafer that escaped the sliver
+    # merge — remove it (or de-namespace it) so it can't become a bogus Piece_N.
+    # Reclaim any real piece left tagged WBHost_*/WBOther_* because its name
+    # restore was missed (e.g. a same-named orphan from a prior run shadowed it
+    # in _by_name).  These are full track pieces above sliver volume — rename
+    # them back so STEP 3 numbers them into the assembly instead of stranding
+    # them loose in root.  Sub-sliver WB* leftovers (stray unwelded nubs) fall
+    # through to the sliver filter below and are removed.
+    # A REAL piece is >> 1 cm³ (the 20x17 mm profile alone is 1.44 cm² of
+    # section, so even a 2 cm stub is ~2.9 cm³); a foot is ~0.3 cm³.  Anything
+    # tagged but foot-sized is NOT a piece — numbering it produced the phantom
+    # Piece_10/Piece_11 bodies.  Park those under WBOrphan_ and report them.
+    _WB_PIECE_MIN_VOL = 1.0
+    _wb_reclaimed = 0
+    _wb_orphans = []
+    for b in _all_bodies(root):
+        if b.name.startswith('WBHost_') or b.name.startswith('WBOther_'):
+            try:
+                _v = b.physicalProperties.volume
+            except Exception:
+                continue
+            if _v >= _WB_PIECE_MIN_VOL:
+                b.name = 'Track_Piece'
+                _wb_reclaimed += 1
+            elif _v >= 0.05:
+                _wb_orphans.append((b.name, round(_v, 4)))
+                try:
+                    b.name = 'WBOrphan_' + b.name
+                except Exception:
+                    pass
+    if _wb_reclaimed and ui:
+        ui.messageBox(
+            f'Reclaimed {_wb_reclaimed} track piece(s) left tagged WBHost_/WBOther_ '
+            f'(name-restore miss) back into the numbered assembly.')
+    if _wb_orphans and ui:
+        ui.messageBox(
+            'Found {} tagged body/bodies too small to be a track piece — NOT '
+            'numbered as pieces (renamed WBOrphan_*):\n\n{}\n\n'
+            'These are almost certainly wall-mount feet that never welded into '
+            'a piece.  Delete them, or fix the junction and re-run.'.format(
+                len(_wb_orphans),
+                '\n'.join(f'  {n}  {v} cm³' for n, v in _wb_orphans)))
+
+    piece_bodies = []
+    _sliver_leftovers = 0
+    for b in _all_bodies(root):
+        if not b.name.startswith('Track_'):
+            continue
+        try:
+            _bv = b.physicalProperties.volume
+        except:
+            _bv = 0.0
+        if _bv < 0.05:
+            _sliver_leftovers += 1
+            try:
+                b.deleteMe()
+            except:
+                try:
+                    b.name = 'Sliver_residual'
+                except:
+                    pass
+            continue
+        piece_bodies.append(b)
+    if _sliver_leftovers and ui:
+        ui.messageBox(
+            f'Removed {_sliver_leftovers} leftover splitter wafer(s) before '
+            f'numbering pieces (would have become bogus thin Piece_N bodies).')
 
     try:
         path_curves = []
@@ -522,16 +832,17 @@ def cut_at_planes(root, ui, design, params):
         body.name = f'Track_Piece_{idx + 1}'
 
     if use_pin_connector:
-        connector_bodies = [b for b in root.bRepBodies if b.name.startswith('Connector_Key_')]
-        connector_label  = (f'{clips_made}/{num_cuts} socket pairs cut + '
-                            f'{len(connector_bodies)} Connector_Key bodies created')
+        connector_label  = f'{clips_made}/{num_cuts} wall-snap joints created'
+        bom_line         = 'Hardware needed: NONE \u2014 snap-fit joints, no screws or glue'
         assembly_tip = (
-            'Assembly tip: all pieces are identical — each end has the same socket.\n'
-            'Print one Connector_Key per junction. Slide key into piece A socket\n'
-            'until centred, then push piece B onto the protruding half.\n'
-            'Press-fit, no hardware. Key hidden inside floor material.'
+            'Assembly tip: each piece has one male end (wall tongues) and one\n'
+            'female end (wall pockets), alternating along the track.\n'
+            'Push two ends together until the side-wall barbs click into place.\n'
+            'Floor + channel stay clear for a continuous LED strip.\n'
+            'To separate: press the barb in through the window on the wall-facing\n'
+            'wall face and pull apart.'
         )
-        connector_export = '\u2022 Right-click each Connector_Key_N body \u2192 Save As Mesh'
+        connector_export = '(no separate body to export — joints are integral)'
     else:
         connector_bodies = [b for b in root.bRepBodies if b.name.startswith('Clip_')]
         connector_label  = f'{clips_made}/{num_cuts} bridge plates created (Clip_N)'
@@ -547,12 +858,14 @@ def cut_at_planes(root, ui, design, params):
 
     # === STEP 4: Create components ===
     sliver_msg = f' ({slivers_removed} slivers merged)' if slivers_removed > 0 else ''
+    bom_line   = bom_line if use_pin_connector else ''
     create_comps = ui.messageBox(
         f'Done!\n\n'
         f'{len(piece_bodies)} track pieces created{sliver_msg}\n'
         f'{cuts_made} cuts made\n'
-        f'{connector_label}\n\n'
-        'Create separate components for each piece?\n'
+        f'{connector_label}\n'
+        + (f'{bom_line}\n' if bom_line else '') +
+        '\nCreate separate components for each piece?\n'
         '(Connector bodies stay as loose bodies for separate STL export)',
         'Create Components?',
         adsk.core.MessageBoxButtonTypes.YesNoButtonType
@@ -1095,7 +1408,8 @@ def _detect_open_side_from_pts(pts_2d, s_min_x, s_max_x, s_min_y, s_max_y):
 # PIN CONNECTOR (no-hardware alternative to M2 screw plate)
 # =============================================================================
 
-def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
+def create_pin_connector(root, cut_plane, params, joint_num, ui=None,
+                         path=None, path_len=0.0, num_pieces=None):
     """Approach B: identical socket in BOTH adjacent pieces + one shared H-key.
 
     All track pieces are identical — no male/female alternation.
@@ -1132,16 +1446,96 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     # Acts as assembly stop + covers junction gap.  Protrudes into channel
     # (wall-hidden side) so invisible when track is mounted.
     # ── Locking style ─────────────────────────────────────────────────────────
-    # 'stud' : half-cylinder boss on collar top + M4 thread (current approach)
-    # 'bore' : M4 clearance hole through collar along track axis, bolt + nut
-    LOCK_STYLE = 'bore'
+    # 'stud'    : half-cylinder boss on collar top + M4 thread
+    # 'vscrew'  : vertical M3 bolt through a channel collar + floor nut trap.
+    #             Blocks a floor-mounted LED strip at 9 mm channel width — retired.
+    # 'wallsnap': integrated cantilever snap-fit lap joint built INTO the two side
+    #             walls (3 mm × 10 mm of hidden material).  No hardware, no glue,
+    #             reversible.  Floor + channel stay 100 % clear for a continuous
+    #             full-width LED strip.  Snap (not slide) so the closed F1 loop's
+    #             last piece can click into place between two fixed neighbours.
+    LOCK_STYLE = 'wallsnap'
 
     COLLAR_HW  = inner_hw - 0.03      # slightly narrower than inner channel
-    # bore needs taller collar: 4.2 mm bore + 0.5 mm min wall each side = 5.2 mm min → 6.5 mm
-    COLLAR_H   = 0.40 if LOCK_STYLE == 'stud' else 0.85  # stud: 4 mm / bore: 8.5 mm (flat-top M4 hex AF=7.1mm + 0.7mm walls)
-    COLLAR_LEN = 1.10                 # 11 mm per piece — wall at hex trap = COLLAR_HALF−CB_DEPTH = 5.5−3.5 = 2.0 mm (4 perimeters, reliably printed)
-    POST_R     = 0.175                # 1.75 mm radius — M4 nominal 2.0 mm, −0.25 mm for FDM tolerance
-    POST_H     = 0.50                 # 5 mm above collar top (enough for M4x0.7 nut engagement)
+    # vscrew: 5 mm collar height gives full M3 self-tap engagement (2.5 mm pilot)
+    COLLAR_H   = 0.40   # 4 mm collar → 3 mm bolt-access gap in 7 mm inner channel
+    COLLAR_LEN = 0.80                 # 8 mm per piece (4 mm each side); bore at x=0 leaves 4−1.7=2.3 mm wall
+    POST_R     = 0.175                # unused for vscrew; kept for stud mode
+    POST_H     = 0.50                 # unused for vscrew; kept for stud mode
+
+    # ── Wall-snap lock (LOCK_STYLE == 'wallsnap') ─────────────────────────────
+    # All in cm.  Built in the local cut-plane frame: X = across width,
+    # Y = floor→wall depth, Z = along track axis (pieces split at Z=0).
+    # One end is male (tongue per wall), the mating end female (pocket + window).
+    # ── Geometry below was VALIDATED ON A PRINT COUPON, 2026-08-03 ───────────
+    # (API/Scripts/TrackTestCoupon, variant A).  The joint had never physically
+    # engaged before that — the wrong TRACK_WIDTH param put the tongue in mid
+    # air — so every number here was previously untested.  What the coupon
+    # showed: the tongue is the SPRING, and a 1.3 mm × 8 mm one is not a spring
+    # at all.  Stiffness goes as t³/L³:
+    #     t=1.3 L=8  w=15 → k 56 N/mm → 35 N to deflect, ~22 N to insert
+    #     t=1.0 L=12 w=15 → k 7.6     →  5 N,            ~3 N
+    # The old joint could not be pushed home by hand; it stalled short with the
+    # barb riding compressed on the land and the window sitting empty.
+    SNAP_LAP_LEN   = 1.20            # 12 mm lap (was 8) — the flex length that
+                                     # makes the tongue an actual cantilever
+    SNAP_TONGUE_T  = 0.10            # 1.0 mm tongue (was wt*0.5-0.02 = 1.3).
+                                     # Thinner = softer spring AND more window
+                                     # skin left in the outer slab.  No longer
+                                     # tied to wt: the wall budget below is what
+                                     # matters, not "half the wall".
+    SNAP_CL        = 0.008           # 0.08 mm print clearance — tightened from 0.12
+                                     # to cut the vertical rattle that lets the joint
+                                     # roll about the track axis (print-tune this knob)
+    SNAP_Y0_INSET  = 0.10            # tongue starts 1 mm above outer floor
+    SNAP_Y1_INSET  = 0.10            # tongue ends 1 mm below channel top
+    SNAP_BARB_X    = 0.07            # 0.7 mm catch.  1.0 mm was tried and is
+                                     # impossible with a BLIND window: the wall
+                                     # budget is tongue + barb + clearance +
+                                     # skin = 3.0 mm, and 1.0 mm of barb leaves
+                                     # 0.45 mm of skin — under one extrusion
+                                     # width, so the slicer DROPS it and prints
+                                     # a through hole (seen 2026-08-03).
+    SNAP_BARB_LEN  = 0.30            # 3.0 mm (was 1.8).  The whole length is
+                                     # the lead-in ramp: the loft runs from the
+                                     # full step at the catch face to FLUSH at
+                                     # the tip, so it must be long enough to
+                                     # take all of SNAP_BARB_X gradually.  At
+                                     # 1.8 mm it ramped only a third of the
+                                     # deflection and the rest happened at the
+                                     # blunt leading corner.
+    SNAP_BARB_H    = 0.80            # 8 mm barb, CENTRED on the ~15 mm tongue.
+                                     # A full-height barb had to drop into a
+                                     # window only 0.16 mm taller than itself —
+                                     # 0.08 mm across 15 mm, which no FDM print
+                                     # holds, so it never entered.  Shorter barb
+                                     # = real clearance, and costs no stiffness
+                                     # (the spring is the tongue, not the bump).
+    SNAP_BARB_CLR  = 0.025           # room past the barb tip inside the window
+    SNAP_BARB_ZCL  = 0.04            # window clearance above/below the barb
+    SNAP_BARB_OVL  = 0.02            # barb overlap back into tongue (combine bond)
+    # Straight-fallback taper must match the loft's full-depth ramp exactly.
+    SNAP_BARB_RAMP = math.degrees(math.atan(SNAP_BARB_X / SNAP_BARB_LEN))
+    # ── Blind barb window: DERIVED, not dialled in ───────────────────────────
+    # The window used to cut 0.5 mm PAST the outer face — 18 through-slots
+    # leaking the LED sideways at every junction.  Blind is opaque and a
+    # stronger catch (closed pocket; the barb can't be knocked in).  Its depth
+    # is fixed by the barb, and whatever skin is left MUST beat one extrusion
+    # width or the slicer silently drops it and prints a hole anyway.
+    #   wall 3.0 = tongue 1.0 + barb 0.7 + clearance 0.25 + SKIN 1.05 mm ✓
+    SNAP_WIN_FLOOR = SNAP_TONGUE_T + SNAP_BARB_X + SNAP_BARB_CLR
+    SNAP_WINDOW_SKIN = wt - SNAP_WIN_FLOOR
+    SNAP_MIN_SKIN  = 0.045           # ~1 extrusion width on a 0.4 mm nozzle
+    if SNAP_WINDOW_SKIN < SNAP_MIN_SKIN and ui:
+        ui.messageBox(
+            f'WallSnap: blind window would leave only '
+            f'{SNAP_WINDOW_SKIN*10:.2f} mm of outer-wall skin '
+            f'(need {SNAP_MIN_SKIN*10:.2f} mm — one extrusion width).\n\n'
+            f'The slicer will DROP it and print a through hole that leaks '
+            f'light.  Reduce SNAP_BARB_X or SNAP_TONGUE_T.')
+    # Cost of a blind window: no pressing the barb from outside to separate —
+    # pull-and-flex, or slit the skin.  Set SNAP_BARB_CLR high (or edit
+    # SNAP_WIN_FLOOR to wt + 0.05) to go back to a through window.
 
     # ── Orientation ──────────────────────────────────────────────────────────
     detect_sk = root.sketches.add(cut_plane)
@@ -1254,6 +1648,22 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
         return sk, best_prof
 
     success = False
+    _val_rec = {
+        'joint_num': joint_num,
+        'is_lower_pos': None,  # filled after is_lower_pos is computed below
+        'bore_cx': None, 'bore_cy': None,
+        'collar':  {'success': False, 'bodies_created': 0, 'error': None},
+        'vbore':   {'success': False, 'profile_found': False, 'error': None},
+        'nuttrap': {'success': False, 'profile_found': False, 'error': None},
+        'wallsnap': None,
+        'volumes': {
+            'collar_vol': None,
+            'boss_before': None, 'boss_after': None, 'bore_removed': None,
+            'bore_expected': round(3.14159265 * 0.17**2 * (0.30 + 0.001), 4),
+            'nut_before': None,  'nut_after': None,  'trap_removed': None,
+            'trap_expected': round(3*1.73205081/2 * 0.328**2 * 0.24, 4),
+        },
+    }
     extrudes = root.features.extrudeFeatures
     cut_normal_v = cut_geom.normal
     cut_normal_v.normalize()
@@ -1270,10 +1680,24 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
     cn = cut_normal
     CHAMFER_D = 0.05   # 0.5 mm lead-in chamfer on top edge of stud
 
-    boss_sk   = None
-    boss_body = None
-    boss_halves = []
+    boss_sk         = None
+    boss_body       = None   # kept for LOCK_STYLE == 'stud' code path; not used by vscrew
+    boss_halves     = []
+    lower_boss_body = None   # collar half at [wt, wt+COLLAR_H/2] — sits on inner floor
+    upper_boss_body = None   # collar half at [wt+COLLAR_H/2, wt+COLLAR_H] — rides on top
+    # Coord vars set by Step 1; Step 4 uses them.  Defaults prevent NameError if
+    # Step 1 raises (Step 4 will bail on missing profile anyway).
+    fy_b   = None; fy_mid = None; fy_top = None
+    P3     = adsk.core.Point3D.create
+    # Alternating assignment: even joint_num → +cut_normal body gets upper collar.
+    # Ensures each physical piece is consistently upper-type or lower-type on both
+    # its junctions (A-B-A-B arrangement along the track).
+    is_lower_pos    = (joint_num % 2 == 1)  # True: +cut_normal body = lower collar
+    _val_rec['is_lower_pos'] = is_lower_pos
     try:
+        # Compute sketch-space coordinates once using a temporary sketch.
+        # We need fy_b (inner floor Y), fy_mid (mid-collar Y), fy_top (top Y)
+        # in the cut_plane sketch's local coordinate system.
         boss_sk = root.sketches.add(cut_plane)
         boss_sk.name = f'RetainBoss_{joint_num}'
         boss_inv = boss_sk.transform.copy()
@@ -1291,31 +1715,20 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
         _ch_b.transformBy(boss_inv)
         inward_b = 1.0 if (_ch_b.y - fy_b) >= 0.0 else -1.0
 
-        boss_pts = [
-            (-COLLAR_HW, fy_b),
-            ( COLLAR_HW, fy_b),
-            ( COLLAR_HW, fy_b + inward_b * COLLAR_H),
-            (-COLLAR_HW, fy_b + inward_b * COLLAR_H),
-        ]
-        L = boss_sk.sketchCurves.sketchLines
-        for i in range(4):
-            a, b_pt = boss_pts[i], boss_pts[(i + 1) % 4]
-            L.addByTwoPoints(
-                adsk.core.Point3D.create(a[0], a[1], 0),
-                adsk.core.Point3D.create(b_pt[0], b_pt[1], 0),
-            )
-        boss_sk.isLightBulbOn = False
+        fy_mid = fy_b + inward_b * (COLLAR_H / 2)
+        fy_top = fy_b + inward_b * COLLAR_H
 
-        if boss_sk.profiles.count > 0:
-            ei = extrudes.createInput(
-                boss_sk.profiles.item(0),
-                adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
-            )
-            ei.setSymmetricExtent(
-                adsk.core.ValueInput.createByReal(COLLAR_LEN), True)
-            boss_feat = extrudes.add(ei)
-            if boss_feat.bodies.count > 0:
-                boss_body = boss_feat.bodies.item(0)
+        # Boss bodies are NOT created here.  Creating them in root when
+        # track bodies live in a Track_Assembly subcomponent causes a
+        # cross-component combineFeatures failure even when using
+        # subcomp.features.combineFeatures.  Instead, Step 4 creates each
+        # boss directly in body.parentComponent right before it combines.
+        P3 = adsk.core.Point3D.create
+
+        # The coord-detection sketch is no longer needed.
+        try: boss_sk.deleteMe()
+        except Exception: pass
+        boss_sk = None
 
     except Exception as e:
         if boss_sk is not None:
@@ -1522,48 +1935,13 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                               f'{e}\n{traceback.format_exc()}')
 
     # ── Step 3: Build angled split plane ──────────────────────────────────────
-    # The split plane is tilted ~8° from cut_plane around the track-width axis
-    # (tw_dir = cut_normal × iy).  Both the collar boss AND each track body are
-    # split at this plane so the entire cross-section has the same scarf face.
-    # This makes the channel-side edge the first contact point when the bolt is
-    # tightened, self-sealing the visible gap regardless of FDM tolerances.
-    SPLIT_ANGLE = math.radians(8)
+    # DISABLED: the scarf was producing a far-steeper-than-expected cut
+    # (~13 mm wedge on a 17 mm track instead of the ~2 mm expected for 8°).
+    # With ang_cp = None the track bodies keep a clean perpendicular junction
+    # face, the collar boss join reliably finds the inner floor, and
+    # _find_iy_face can locate the collar faces.
+    # TODO: re-enable and fix the angle calculation once bore/nut is validated.
     ang_cp = None
-    try:
-        # Track-width direction = cut_normal × iy (normalised)
-        tw_x = cut_normal.y*iy.z - cut_normal.z*iy.y
-        tw_y = cut_normal.z*iy.x - cut_normal.x*iy.z
-        tw_z = cut_normal.x*iy.y - cut_normal.y*iy.x
-        tw_len = math.sqrt(tw_x*tw_x + tw_y*tw_y + tw_z*tw_z)
-        if tw_len > 1e-6:
-            tw_x /= tw_len; tw_y /= tw_len; tw_z /= tw_len
-
-        # Sketch on cut_plane with a construction line along tw_dir through the
-        # origin.  setByAngle accepts SketchLine; setByThreePoints requires entity
-        # objects, not raw Point3D — this avoids "Environment not supported".
-        split_sk = root.sketches.add(cut_plane)
-        split_sk.isLightBulbOn = False
-        sk_tr  = split_sk.transform
-        sk_xw  = (sk_tr.getCell(0,0), sk_tr.getCell(1,0), sk_tr.getCell(2,0))
-        sk_yw  = (sk_tr.getCell(0,1), sk_tr.getCell(1,1), sk_tr.getCell(2,1))
-        u = tw_x*sk_xw[0] + tw_y*sk_xw[1] + tw_z*sk_xw[2]
-        v = tw_x*sk_yw[0] + tw_y*sk_yw[1] + tw_z*sk_yw[2]
-        SL = 5.0
-        sl_a = adsk.core.Point3D.create(-u*SL, -v*SL, 0)
-        sl_b = adsk.core.Point3D.create( u*SL,  v*SL, 0)
-        split_line = split_sk.sketchCurves.sketchLines.addByTwoPoints(sl_a, sl_b)
-        split_line.isConstruction = True
-
-        ang_cp_in = root.constructionPlanes.createInput()
-        ang_cp_in.setByAngle(split_line,
-                             adsk.core.ValueInput.createByReal(SPLIT_ANGLE),
-                             cut_plane)
-        ang_cp = root.constructionPlanes.add(ang_cp_in)
-        ang_cp.isLightBulbOn = False
-    except Exception as e:
-        if ui:
-            ui.messageBox(f'Angled split plane failed (jct {joint_num}):\n'
-                          f'{e}\n{traceback.format_exc()}')
 
     # (Step 3b removed — bounded patch approach was unreliable; track body trim
     #  now uses ang_cp directly in Step 4, keeping the largest correct-side body.)
@@ -1620,9 +1998,15 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                         if vol > main_vol: main_vol = vol; main_neg = p
                     else:                                  # the wedge to transfer
                         if vol < wedge_vol: wedge_vol = vol; wedge = p
-                for p in parts:                            # discard any extras
+                # Do NOT call deleteMe() on extras here.
+                # Deleting a splitBodyFeature result body can invalidate the
+                # entire split feature in Fusion's kernel, voiding the references
+                # to main_neg and wedge and causing "deleted object" on the
+                # subsequent combineFeatures.add.  Leave orphan slivers as-is;
+                # they can be deleted manually if they appear in the browser.
+                for p in parts:
                     if p is not main_neg and p is not wedge:
-                        try: p.deleteMe()
+                        try: p.name = f'ScarfExtra_{joint_num}'
                         except: pass
 
                 if main_neg is not None:
@@ -1642,309 +2026,1040 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                 ui.messageBox(f'Track scarf failed (jct {joint_num}):\n'
                               f'{e_scarf}\n{traceback.format_exc()}')
 
-    # ── Step 4: Match each half to its track body and join ────────────────────
-    # Boss half CoMs are ±COLLAR_LEN/2 from cut plane → sign unambiguous.
-    # Track body side determined from junction face outward normal.
-    used_halves = set()
-    for tp_idx, (body, jct_face) in enumerate(track_pairs):
+    # ── Step 4: Join each collar boss to its track body ──────────────────────
+    # is_lower_pos (set in Step 1): True → +cut_normal body gets the lower boss.
+    # The lower boss sits on the inner floor; the upper boss rides on top of it
+    # when two pieces are assembled.  Alternating joint_num ensures each physical
+    # piece is consistently lower-type or upper-type on both its junctions.
+    #
+    # lower_track_idx / upper_track_idx record which track_bodies entry received
+    # each boss, so Step 4b can identify bodies reliably without re-doing CoM
+    # arithmetic (which fails at hairpins where both CoMs land on the same side).
+    lower_track_idx = None
+    upper_track_idx = None
+    # _NUT_INSET: bore + nut-trap centre from junction into nut piece.
+    #   Must be ≥ M3_NUT_CR so the full hex pocket clears the junction edge.
+    # BOSS_OWN: how far the boss extends INTO its own piece (overlap for combine
+    #   reliability and structural strength).
+    # Boss total = COLLAR_LEN (into nut piece) + BOSS_OWN (into own piece).
+    BOSS_OWN   = 0.30           # 3.0 mm overlap into boss piece
+
+    # Bore / nut-trap constants (vscrew; flat XY track assumed).
+    VBORE_R   = 0.17    # 1.7 mm radius = 3.4 mm dia M3 clearance
+    M3_NUT_CR = 0.328   # M3 hex circumradius (AF 5.5 mm + 0.1 mm tol)
+    M3_NUT_D  = 0.24    # M3 nut height 2.4 mm
+    # Bore/trap centre offset from junction INTO nut piece — hex far edge clears junction by 0.5 mm.
+    _NUT_INSET = M3_NUT_CR + 0.05   # 3.78 mm
+    _nut_sign = 1.0 if is_lower_pos else -1.0
+    bore_cx   = cut_origin.x + _nut_sign * _NUT_INSET * cut_normal.x
+    bore_cy   = cut_origin.y + _nut_sign * _NUT_INSET * cut_normal.y
+
+    def _bore_plane_at(height):
+        """XY-offset plane at cut_origin.z + height (flat track only)."""
+        _cp_in = root.constructionPlanes.createInput()
+        _cp_in.setByOffset(root.xYConstructionPlane,
+                           adsk.core.ValueInput.createByReal(cut_origin.z + height))
+        _cp = root.constructionPlanes.add(_cp_in)
+        _cp.isLightBulbOn = False
+        return _cp
+
+    # Pre-loop: determine lower_tp_idx via RELATIVE CoM comparison so that
+    # exactly one body is lower and one is upper even at hairpins where both
+    # CoMs land on the same side of cut_plane.
+    # The body whose CoM dot product is most in the is_lower_pos direction → lower.
+    _lower_tp_idx = 0   # fallback: first body is lower
+    if len(track_pairs) >= 2:
+        _dots = []
+        for _b, _ in track_pairs[:2]:
+            _c = _b.physicalProperties.centerOfMass
+            _dots.append(
+                (_c.x - cut_origin.x)*cut_normal.x +
+                (_c.y - cut_origin.y)*cut_normal.y +
+                (_c.z - cut_origin.z)*cut_normal.z)
+        # is_lower_pos=True → nut piece at +cut_normal: pick body with larger dot
+        # is_lower_pos=False → nut piece at -cut_normal: pick body with smaller dot
+        if is_lower_pos:
+            _lower_tp_idx = 0 if _dots[0] >= _dots[1] else 1
+        else:
+            _lower_tp_idx = 0 if _dots[0] < _dots[1] else 1
+
+    for tp_idx, (body, _jct_face) in (
+            enumerate(track_pairs) if LOCK_STYLE == 'vscrew' else []):
         try:
-            if not boss_halves or jct_face is None:
+            if fy_b is None:
+                if ui: ui.messageBox(f'RetainBoss jct {joint_num}: coord detection failed, skipping boss')
                 continue
+            body_is_lower = (tp_idx == _lower_tp_idx)
 
-            ok_n, fn = jct_face.evaluator.getNormalAtPoint(jct_face.pointOnFace)
-            if not ok_n:
-                fn = jct_face.geometry.normal
-            # fn is outward from body → body occupies the OPPOSITE side from fn
-            fn_dot = (fn.x * cut_normal.x +
-                      fn.y * cut_normal.y +
-                      fn.z * cut_normal.z)
-            track_side = -1 if fn_dot > 0 else +1
+            # Boss piece (body_is_lower=False): collar insert + VBore through collar.
+            # Nut piece  (body_is_lower=True):  hex nut trap in floor.
+            if not body_is_lower:
+                comp          = body.parentComponent
+                comp_extrudes = comp.features.extrudeFeatures
 
-            for i, half in enumerate(boss_halves):
-                if i in used_halves:
-                    continue
-                com = half.physicalProperties.centerOfMass
-                half_dot = ((com.x - cut_origin.x) * cut_normal.x +
-                            (com.y - cut_origin.y) * cut_normal.y +
-                            (com.z - cut_origin.z) * cut_normal.z)
-                half_side = +1 if half_dot >= 0 else -1
-                if half_side == track_side:
-                    # Fillet all external collar edges before joining.
-                    # Exclude any edge that touches the junction face (d≈0 from
-                    # cut_origin along cut_normal) — both edges ON the junction face
-                    # and edges whose vertices lie on it.  This prevents fillets from
-                    # wrapping around the junction corners and creating gaps at the seam.
-                    FILLET_R = 0.08   # 0.8 mm
+                # Determine which sketch-Z direction is toward nut piece.
+                _sk_dir = comp.sketches.add(cut_plane)
+                _sk_dir.isLightBulbOn = False
+                _sl_tr  = _sk_dir.transform
+                _skz_cn = (_sl_tr.getCell(0,2)*cut_normal.x +
+                           _sl_tr.getCell(1,2)*cut_normal.y +
+                           _sl_tr.getCell(2,2)*cut_normal.z)
+                _toward_nut = (is_lower_pos == (_skz_cn > 0))
+
+                # ── Collar insert: NewBodyFeatureOperation, no combine ────────
+                # Rectangle from fy_b (inner floor) to fy_top (fy_b + COLLAR_H).
+                # Extends BOSS_OWN into boss channel + COLLAR_LEN into nut channel.
+                # Stays as separate body — prints as a connector insert piece.
+                _collar     = None
+                _collar_err = None
+                _collar_vol = None
+                try:
+                    _sk_c = comp.sketches.add(cut_plane)
+                    _sk_c.name = f'Collar_{joint_num}'
+                    _sk_c.isLightBulbOn = False
+                    _Lc = _sk_c.sketchCurves.sketchLines
+                    _Lc.addByTwoPoints(P3(-COLLAR_HW, fy_b,   0), P3( COLLAR_HW, fy_b,   0))
+                    _Lc.addByTwoPoints(P3( COLLAR_HW, fy_b,   0), P3( COLLAR_HW, fy_top, 0))
+                    _Lc.addByTwoPoints(P3( COLLAR_HW, fy_top, 0), P3(-COLLAR_HW, fy_top, 0))
+                    _Lc.addByTwoPoints(P3(-COLLAR_HW, fy_top, 0), P3(-COLLAR_HW, fy_b,   0))
+                    if _sk_c.profiles.count > 0:
+                        _pc = min(
+                            [_sk_c.profiles.item(_i) for _i in range(_sk_c.profiles.count)],
+                            key=lambda p: (
+                                (p.boundingBox.maxPoint.x - p.boundingBox.minPoint.x) *
+                                (p.boundingBox.maxPoint.y - p.boundingBox.minPoint.y)))
+                        _ei_c = comp_extrudes.createInput(
+                            _pc, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+                        # setTwoSidesExtent needs DistanceExtentDefinition, not bare ValueInput
+                        _d_nut  = adsk.fusion.DistanceExtentDefinition.create(
+                            adsk.core.ValueInput.createByReal(COLLAR_LEN))
+                        _d_boss = adsk.fusion.DistanceExtentDefinition.create(
+                            adsk.core.ValueInput.createByReal(BOSS_OWN))
+                        if _toward_nut:
+                            _ei_c.setTwoSidesExtent(_d_nut, _d_boss)
+                        else:
+                            _ei_c.setTwoSidesExtent(_d_boss, _d_nut)
+                        _fc = comp_extrudes.add(_ei_c)
+                        if _fc.bodies.count > 0:
+                            _collar = _fc.bodies.item(0)
+                            _collar.name = f'Collar_{joint_num}'
+                            try:
+                                _collar_vol = _collar.physicalProperties.volume
+                            except Exception:
+                                pass
+                    else:
+                        _collar_err = 'no profile on cut_plane'
+                        if ui:
+                            ui.messageBox(f'Collar_{joint_num}: no profile')
+                except Exception as _e_c:
+                    _collar_err = str(_e_c)
+                    if ui:
+                        ui.messageBox(f'Collar failed (jct {joint_num}):\n'
+                                      f'{_e_c}\n{traceback.format_exc()}')
+
+                # ── VBore through collar only ─────────────────────────────────
+                # Plane at wt+COLLAR_H-0.001 (inside collar top, avoids on-face bug).
+                # participantBodies=[_collar] — bore_cx is 3.78mm into nut piece,
+                # which is within the collar body (collar extends COLLAR_LEN=8mm). ✓
+                _vbore_ok  = False
+                _vbore_err = None
+                if _collar is not None:
                     try:
-                        fillet_edges = adsk.core.ObjectCollection.create()
-                        for ei in range(half.edges.count):
-                            edge = half.edges.item(ei)
-                            on_jct = False
-                            # Check adjacent faces
-                            for fi in range(edge.faces.count):
-                                f = edge.faces.item(fi)
-                                if not isinstance(f.geometry, adsk.core.Plane):
-                                    continue
-                                fn_e = f.geometry.normal
-                                nd_e = abs(fn_e.x*cut_normal.x +
-                                           fn_e.y*cut_normal.y +
-                                           fn_e.z*cut_normal.z)
-                                if nd_e < 0.9:
-                                    continue
-                                fp_e = f.pointOnFace
-                                d_e  = abs((fp_e.x - cut_origin.x)*cut_normal.x +
-                                           (fp_e.y - cut_origin.y)*cut_normal.y +
-                                           (fp_e.z - cut_origin.z)*cut_normal.z)
-                                if d_e < 0.05:
-                                    on_jct = True
-                                    break
-                            if on_jct:
-                                continue
-                            # Also skip edges whose endpoints touch the junction plane
-                            # (prevents fillet propagation to junction-adjacent corners)
-                            for vi in range(edge.vertices.count):
-                                gv = edge.vertices.item(vi).geometry
-                                d_v = abs((gv.x - cut_origin.x)*cut_normal.x +
-                                          (gv.y - cut_origin.y)*cut_normal.y +
-                                          (gv.z - cut_origin.z)*cut_normal.z)
-                                if d_v < 0.05:
-                                    on_jct = True
-                                    break
-                            if not on_jct:
-                                fillet_edges.add(edge)
-                        if fillet_edges.count > 0:
-                            fi_in = root.features.filletFeatures.createInput()
-                            fi_in.addConstantRadiusEdgeSet(
-                                fillet_edges,
-                                adsk.core.ValueInput.createByReal(FILLET_R),
-                                True)
-                            root.features.filletFeatures.add(fi_in)
-                    except Exception as e_fil:
-                        pass   # fillet is cosmetic — don't block the join
+                        _bb_cp = _bore_plane_at(wt + COLLAR_H + 0.001)  # free air above collar — avoids Z-flip inside body
+                        _bb_sk = root.sketches.add(_bb_cp)
+                        _bb_sk.name = f'VBore_{joint_num}'
+                        _bb_sk.isLightBulbOn = False
+                        _bb_sk.sketchCurves.sketchCircles.addByCenterRadius(
+                            adsk.core.Point3D.create(bore_cx, bore_cy, 0), VBORE_R)
+                        if _bb_sk.profiles.count > 0:
+                            _bb_prof = min(
+                                [_bb_sk.profiles.item(_i)
+                                 for _i in range(_bb_sk.profiles.count)],
+                                key=lambda p: (
+                                    (p.boundingBox.maxPoint.x - p.boundingBox.minPoint.x) *
+                                    (p.boundingBox.maxPoint.y - p.boundingBox.minPoint.y)))
+                            _bb_tr  = _bb_sk.transform
+                            _bb_skz = (_bb_tr.getCell(0,2)*iy.x +
+                                       _bb_tr.getCell(1,2)*iy.y +
+                                       _bb_tr.getCell(2,2)*iy.z)
+                            _ei_bb = extrudes.createInput(
+                                _bb_prof,
+                                adsk.fusion.FeatureOperations.CutFeatureOperation)
+                            _ei_bb.setDistanceExtent(
+                                _bb_skz < 0,
+                                adsk.core.ValueInput.createByReal(COLLAR_H + 0.002))
+                            _ei_bb.participantBodies = [_collar]
+                            extrudes.add(_ei_bb)
+                            _vbore_ok = True
+                            success = True
+                            try:
+                                _collar_vol_after = _collar.physicalProperties.volume
+                            except Exception:
+                                _collar_vol_after = None
+                        else:
+                            _vbore_err = 'no profile'
+                            _collar_vol_after = None
+                            if ui:
+                                ui.messageBox(f'VBore_{joint_num}: no profile')
+                    except Exception as _e_bb:
+                        _vbore_err = str(_e_bb)
+                        _collar_vol_after = None
+                        if ui:
+                            ui.messageBox(f'VBore failed (jct {joint_num}):\n'
+                                          f'{_e_bb}\n{traceback.format_exc()}')
 
-                    tools_oc = adsk.core.ObjectCollection.create()
-                    tools_oc.add(half)
-                    ci = root.features.combineFeatures.createInput(body, tools_oc)
-                    ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
-                    root.features.combineFeatures.add(ci)
-                    used_halves.add(i)
-                    break
+                # Capture state into validation record.
+                _boss_vol_before = None
+                try:
+                    _boss_vol_before = body.physicalProperties.volume
+                except Exception:
+                    pass
+                _bore_removed = None
+                if _collar_vol is not None and _collar_vol_after is not None:
+                    _bore_removed = round(_collar_vol - _collar_vol_after, 6)
+                _val_rec['bore_cx'] = bore_cx
+                _val_rec['bore_cy'] = bore_cy
+                _val_rec['collar']['success'] = _collar is not None
+                _val_rec['collar']['bodies_created'] = 1 if _collar is not None else 0
+                _val_rec['collar']['error'] = _collar_err
+                _val_rec['vbore']['success'] = _vbore_ok
+                _val_rec['vbore']['profile_found'] = _vbore_ok or (_vbore_err != 'no profile')
+                _val_rec['vbore']['error'] = _vbore_err
+                _val_rec['volumes']['collar_vol'] = _collar_vol
+                _val_rec['volumes']['collar_vol_after'] = _collar_vol_after
+                _val_rec['volumes']['bore_removed'] = _bore_removed
+                _val_rec['volumes']['boss_before'] = _boss_vol_before
+
+            if body_is_lower:
+                lower_track_idx = tp_idx
+                # Nut piece: hex nut trap in floor.
+                # Sketch at wt-0.001 (0.01 mm inside inner floor face).
+                _nt_err = None
+                _nt_profile_found = False
+                _nut_vol_before = None
+                _nut_vol_after  = None
+                try:
+                    _nt_name = body.name
+                    for _rb in _all_bodies(root):
+                        if _rb.name == _nt_name:
+                            body = _rb
+                            break
+                    try:
+                        _nut_vol_before = body.physicalProperties.volume
+                    except Exception:
+                        pass
+                    _nt_cp = _bore_plane_at(wt + COLLAR_H + 0.001)  # free air above collar — avoids Z-flip inside body
+                    _nt_sk = root.sketches.add(_nt_cp)
+                    _nt_sk.name  = f'NutTrap_{joint_num}'
+                    _nt_sk.isLightBulbOn = False
+                    _nt_ln = _nt_sk.sketchCurves.sketchLines
+                    for _i in range(6):
+                        _na = adsk.core.Point3D.create(
+                            bore_cx + M3_NUT_CR * math.cos(
+                                _i * math.pi / 3 + math.pi / 6),
+                            bore_cy + M3_NUT_CR * math.sin(
+                                _i * math.pi / 3 + math.pi / 6), 0)
+                        _nb = adsk.core.Point3D.create(
+                            bore_cx + M3_NUT_CR * math.cos(
+                                (_i+1) * math.pi / 3 + math.pi / 6),
+                            bore_cy + M3_NUT_CR * math.sin(
+                                (_i+1) * math.pi / 3 + math.pi / 6), 0)
+                        _nt_ln.addByTwoPoints(_na, _nb)
+                    if _nt_sk.profiles.count > 0:
+                        _nt_profile_found = True
+                        _nt_prof = min(
+                            [_nt_sk.profiles.item(_i)
+                             for _i in range(_nt_sk.profiles.count)],
+                            key=lambda p: (
+                                (p.boundingBox.maxPoint.x - p.boundingBox.minPoint.x) *
+                                (p.boundingBox.maxPoint.y - p.boundingBox.minPoint.y)))
+                        _nt_tr  = _nt_sk.transform
+                        _nt_skz = (_nt_tr.getCell(0,2)*iy.x +
+                                   _nt_tr.getCell(1,2)*iy.y +
+                                   _nt_tr.getCell(2,2)*iy.z)
+                        _ei_nt = extrudes.createInput(
+                            _nt_prof,
+                            adsk.fusion.FeatureOperations.CutFeatureOperation)
+                        _ei_nt.setDistanceExtent(
+                            _nt_skz < 0,
+                            adsk.core.ValueInput.createByReal(COLLAR_H + M3_NUT_D + 0.001))
+                        _ei_nt.participantBodies = [body]
+                        extrudes.add(_ei_nt)
+                        success = True
+                        try:
+                            _nut_vol_after = body.physicalProperties.volume
+                        except Exception:
+                            pass
+                    else:
+                        _nt_err = 'no profile'
+                        if ui:
+                            ui.messageBox(f'NutTrap_{joint_num}: no profile')
+                except Exception as _e_trap:
+                    _nt_err = str(_e_trap)
+                    if ui:
+                        ui.messageBox(f'NutTrap failed (jct {joint_num}):\n'
+                                      f'{_e_trap}\n{traceback.format_exc()}')
+                _trap_removed = (
+                    round(_nut_vol_before - _nut_vol_after, 5)
+                    if _nut_vol_before is not None and _nut_vol_after is not None
+                    else None)
+                _val_rec['nuttrap']['success'] = success and _nt_profile_found
+                _val_rec['nuttrap']['profile_found'] = _nt_profile_found
+                _val_rec['nuttrap']['error'] = _nt_err
+                _val_rec['volumes']['nut_before']   = _nut_vol_before
+                _val_rec['volumes']['nut_after']    = _nut_vol_after
+                _val_rec['volumes']['trap_removed'] = _trap_removed
+            else:
+                upper_track_idx = tp_idx
 
         except Exception as e:
             if ui:
-                ui.messageBox(f'RetainBoss join failed (jct {joint_num}, {body.name}):\n'
+                ui.messageBox(f'RetainBoss join failed (jct {joint_num}, body {tp_idx}):\n'
                               f'{e}\n{traceback.format_exc()}')
 
-    # ── Step 4b: Axial bore through collar (LOCK_STYLE == 'bore') ────────────
-    # Both track bodies already have their collar halves joined.  One sketch on
-    # cut_plane, symmetric extrude → participantBodies cuts both simultaneously,
-    # giving each piece an 8 mm blind bore that together form a 16 mm tunnel.
-    # Insert M4 bolt + nut from the ends of the assembled collar.
-    if LOCK_STYLE == 'bore' and track_bodies:
-        BORE_R_AX  = 0.21   # 2.1 mm radius = 4.2 mm (M4 clearance)
-        # Hex nut trap — body 0 (nut side)
-        # M4 nut AF=7.0 mm + 0.2 mm tolerance → AF_hex=7.2 mm
-        # circumradius = (AF/2) / cos(30°)
-        HEX_AF_CM  = 0.71                              # 7.1 mm across flats (0.1 mm total AF gap vs M4 nut 7.0 mm)
-        HEX_CR     = (HEX_AF_CM / 2.0) / math.cos(math.pi / 6)   # ≈ 0.4157 cm
-        CB_DEPTH   = 0.35   # 3.5 mm (M4 nut height 3.2 mm + 0.3 mm)
-        try:
-            bore_sk = root.sketches.add(cut_plane)
-            bore_sk.name  = f'CollarBore_{joint_num}'
-            bore_sk.isLightBulbOn = False
-            bore_inv = bore_sk.transform.copy()
-            bore_inv.invert()
-            # Centre at collar mid-height in _iyw direction
-            bore_ctr_w = adsk.core.Point3D.create(
-                floor_w.x + iy.x * COLLAR_H * 0.5,
-                floor_w.y + iy.y * COLLAR_H * 0.5,
-                floor_w.z + iy.z * COLLAR_H * 0.5,
-            )
-            bc = bore_ctr_w.copy()
-            bc.transformBy(bore_inv)
-            ctr_2d = adsk.core.Point3D.create(bc.x, bc.y, 0)
+    # ── Step 4 (wallsnap): cantilever snap-fit lap joint in the side walls ────
+    # Male end = tongue per wall (Join); female end = pocket + window (Cut).
+    # Floor + channel stay fully clear for the LED strip.  Geometry is direction-
+    # independent (symmetric tongue/pocket); only the far-slab window/barb need a
+    # side, taken from the male junction-face normal (robust at hairpins, unlike
+    # CoM which degenerates there — see MEMORY.md).
+    if LOCK_STYLE == 'wallsnap':
+        th   = params['TRACK_HEIGHT']
+        ch_h = th - wt                      # channel height (0.7 cm)
+        # ── Male/female assignment — CONSISTENT, not parity-flipped ───────────
+        # cut_normal is the path tangent (consistently oriented along the path),
+        # so the body further along +cut_normal is the DOWNSTREAM piece and the
+        # other is UPSTREAM.  Rule: downstream = male, upstream = female, at every
+        # junction.  Then each piece is the downstream body at its leading
+        # junction (male end) and the upstream body at its trailing junction
+        # (female end) → exactly one male + one female end per piece.
+        #
+        # The previous `_lower_tp_idx` used a joint_num-parity flip, which made
+        # the rule alternate each junction and produced male-male / female-female
+        # pieces (tongues on both ends).  Use a RELATIVE CoM-dot comparison so the
+        # pick stays valid even at hairpins where both CoMs land on the same side.
+        if len(track_pairs) >= 2:
+            _md = []
+            for _b, _ in track_pairs[:2]:
+                _c = _b.physicalProperties.centerOfMass
+                _md.append((_c.x - cut_origin.x) * cut_normal.x +
+                           (_c.y - cut_origin.y) * cut_normal.y +
+                           (_c.z - cut_origin.z) * cut_normal.z)
+            male_idx   = 0 if _md[0] >= _md[1] else 1   # downstream (+cut_normal)
+            female_idx = 1 - male_idx
+        else:
+            male_idx   = 0
+            female_idx = None
+        ws_rec = {'male_idx': male_idx, 'female_idx': female_idx, 'walls': []}
+        _val_rec['wallsnap'] = ws_rec
 
-            # Through bore (M4 clearance) — cuts both track bodies simultaneously
-            bore_sk.sketchCurves.sketchCircles.addByCenterRadius(ctr_2d, BORE_R_AX)
-            if bore_sk.profiles.count > 0:
-                ei_b = extrudes.createInput(
-                    bore_sk.profiles.item(0),
-                    adsk.fusion.FeatureOperations.CutFeatureOperation)
-                ei_b.setSymmetricExtent(
-                    adsk.core.ValueInput.createByReal(COLLAR_LEN), True)
-                ei_b.participantBodies = list(track_bodies)
-                extrudes.add(ei_b)
-
-            # Hex nut trap at each collar OUTER END FACE (captive nut design).
-            # setSymmetricExtent(COLLAR_LEN, isFullLength=True) → each half extends
-            # COLLAR_LEN/2 from the cut plane, so end face is at COLLAR_LEN/2.
-            COLLAR_HALF = COLLAR_LEN / 2.0
-            for body_idx2, body in enumerate(track_bodies):
-                try:
-                    com_b = body.physicalProperties.centerOfMass
-                    com_dot_b = ((com_b.x - cut_origin.x)*cut_normal.x +
-                                 (com_b.y - cut_origin.y)*cut_normal.y +
-                                 (com_b.z - cut_origin.z)*cut_normal.z)
-                    body_sign = +1 if com_dot_b >= 0 else -1
-
-                    # Use a construction plane at exactly ±COLLAR_HALF from cut_plane.
-                    # No face search needed — we know the collar ends there.
-                    cp_in = root.constructionPlanes.createInput()
-                    cp_in.setByOffset(
-                        cut_plane,
-                        adsk.core.ValueInput.createByReal(body_sign * COLLAR_HALF))
-                    end_cp = root.constructionPlanes.add(cp_in)
-                    end_cp.isLightBulbOn = False
-
-                    trap_sk = root.sketches.add(end_cp)
-                    trap_sk.name = f'CollarTrap_{joint_num}_{body_idx2}'
-                    trap_sk.isLightBulbOn = False
-
-                    # Transform bore centre into sketch space
-                    trap_inv = trap_sk.transform.copy()
-                    trap_inv.invert()
-                    bc_t = bore_ctr_w.copy()
-                    bc_t.transformBy(trap_inv)
-                    ctr_t = adsk.core.Point3D.create(bc_t.x, bc_t.y, 0)
-
-                    # Hex nut trap — flat-top (vertex at π/6) so nut cannot rotate
-                    hex_pts_t = [
-                        adsk.core.Point3D.create(
-                            ctr_t.x + HEX_CR * math.cos(i * math.pi / 3),
-                            ctr_t.y + HEX_CR * math.sin(i * math.pi / 3),
-                            0)
-                        for i in range(6)
-                    ]
-                    sk_lines_t = trap_sk.sketchCurves.sketchLines
-                    for i in range(6):
-                        sk_lines_t.addByTwoPoints(hex_pts_t[i], hex_pts_t[(i + 1) % 6])
-
-                    # Largest profile = hex interior (construction plane has no face boundary)
-                    if trap_sk.profiles.count == 0:
-                        if ui:
-                            ui.messageBox(f'HexTrap jct {joint_num} body {body_idx2}: no profile')
-                        continue
-                    trap_prof = trap_sk.profiles.item(0)
-                    best_a = 0
-                    for pi in range(trap_sk.profiles.count):
-                        p  = trap_sk.profiles.item(pi)
-                        bb = p.boundingBox
-                        a  = (bb.maxPoint.x - bb.minPoint.x) * (bb.maxPoint.y - bb.minPoint.y)
-                        if a > best_a:
-                            best_a = a; trap_prof = p
-
-                    # Sketch Z (col 2 of transform) vs inward direction → pick correct side
-                    trap_tr = trap_sk.transform
-                    sz_x = trap_tr.getCell(0, 2)
-                    sz_y = trap_tr.getCell(1, 2)
-                    sz_z = trap_tr.getCell(2, 2)
-                    in_x = -body_sign * cut_normal.x
-                    in_y = -body_sign * cut_normal.y
-                    in_z = -body_sign * cut_normal.z
-                    is_pos_inward = (sz_x*in_x + sz_y*in_y + sz_z*in_z) > 0
-
-                    ei_t = extrudes.createInput(
-                        trap_prof,
-                        adsk.fusion.FeatureOperations.CutFeatureOperation)
-                    ei_t.setDistanceExtent(
-                        is_pos_inward, adsk.core.ValueInput.createByReal(CB_DEPTH))
-                    ei_t.participantBodies = [body]
-                    extrudes.add(ei_t)
-                except Exception as e_cb:
-                    if ui:
-                        ui.messageBox(f'HexTrap failed jct {joint_num} body {body_idx2}: {e_cb}\n'
-                                      f'{traceback.format_exc()}')
-
-            # Anti-rotation alignment pin on the junction face.
-            # Body 0: round boss protrudes toward body 1.
-            # Body 1: matching socket (clearance fit) cut into junction face.
-            # Pin placed at lower-right CORNER of the collar, away from the bore.
-            # Clearance check: distance from bore centre = sqrt((HW*0.65)²+(H*0.25)²)
-            #   ≈ sqrt(2.73²+2.13²) ≈ 3.46 mm > bore_r(2.1)+pin_r(0.75) = 2.85 mm ✓
-            PIN_R  = 0.075  # 0.75 mm radius = 1.5 mm diameter
-            PIN_CL = 0.025  # 0.25 mm socket radial clearance
-            PIN_D  = 0.10   # 1.0 mm depth each side
-            # Sketch X axis of bore sketch = track-width direction in world space
-            sk_tr_b = bore_sk.transform
-            sk_x_w  = adsk.core.Vector3D.create(
-                sk_tr_b.getCell(0, 0),
-                sk_tr_b.getCell(1, 0),
-                sk_tr_b.getCell(2, 0))
-            # Lower-right corner: +65 % of half-width laterally, −25 % of collar height
-            pin_ofs_w = adsk.core.Point3D.create(
-                bore_ctr_w.x + sk_x_w.x * COLLAR_HW * 0.65 - iy.x * COLLAR_H * 0.25,
-                bore_ctr_w.y + sk_x_w.y * COLLAR_HW * 0.65 - iy.y * COLLAR_H * 0.25,
-                bore_ctr_w.z + sk_x_w.z * COLLAR_HW * 0.65 - iy.z * COLLAR_H * 0.25,
-            )
-            for pin_idx, body in enumerate(track_bodies):
-                try:
-                    com_p = body.physicalProperties.centerOfMass
-                    com_dot_p = ((com_p.x - cut_origin.x)*cut_normal.x +
-                                 (com_p.y - cut_origin.y)*cut_normal.y +
-                                 (com_p.z - cut_origin.z)*cut_normal.z)
-                    body_sign = +1 if com_dot_p >= 0 else -1
-
-                    # Sketch on ang_cp (the actual junction face after scarf trim).
-                    # Using cut_plane would leave a gap equal to the tilt offset at
-                    # the pin height; ang_cp projects pin_ofs_w correctly onto the
-                    # real junction surface (Z=0 in sketch coords = on-plane).
-                    pin_ref = ang_cp if ang_cp is not None else cut_plane
-                    pin_sk = root.sketches.add(pin_ref)
-                    pin_sk.name = f'CollarPin_{joint_num}_{pin_idx}'
-                    pin_sk.isLightBulbOn = False
-                    pin_inv = pin_sk.transform.copy()
-                    pin_inv.invert()
-                    po = pin_ofs_w.copy()
-                    po.transformBy(pin_inv)
-                    pin_ctr = adsk.core.Point3D.create(po.x, po.y, 0)
-
-                    # Direction toward this body (sketch Z dotted with body direction)
-                    pin_tr = pin_sk.transform
-                    pz_x = pin_tr.getCell(0, 2)
-                    pz_y = pin_tr.getCell(1, 2)
-                    pz_z = pin_tr.getCell(2, 2)
-                    is_pos_toward = (pz_x*(body_sign*cut_normal.x) +
-                                     pz_y*(body_sign*cut_normal.y) +
-                                     pz_z*(body_sign*cut_normal.z)) > 0
-
-                    if pin_idx == 0:
-                        # Boss: new body then join
-                        pin_sk.sketchCurves.sketchCircles.addByCenterRadius(pin_ctr, PIN_R)
-                        boss_ei = extrudes.createInput(
-                            pin_sk.profiles.item(0),
-                            adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-                        boss_ei.setDistanceExtent(
-                            is_pos_toward, adsk.core.ValueInput.createByReal(PIN_D))
-                        boss_feat = extrudes.add(boss_ei)
-                        boss_body = boss_feat.bodies.item(0)
-                        tools_oc = adsk.core.ObjectCollection.create()
-                        tools_oc.add(boss_body)
-                        ci = root.features.combineFeatures.createInput(body, tools_oc)
-                        ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
-                        root.features.combineFeatures.add(ci)
-                    else:
-                        # Socket: cut with clearance into body 1
-                        pin_sk.sketchCurves.sketchCircles.addByCenterRadius(pin_ctr, PIN_R + PIN_CL)
-                        sock_ei = extrudes.createInput(
-                            pin_sk.profiles.item(0),
-                            adsk.fusion.FeatureOperations.CutFeatureOperation)
-                        sock_ei.setDistanceExtent(
-                            is_pos_toward,
-                            adsk.core.ValueInput.createByReal(PIN_D + 0.02))  # 0.2 mm extra depth
-                        sock_ei.participantBodies = [body]
-                        extrudes.add(sock_ei)
-                except Exception as e_pin:
-                    if ui:
-                        ui.messageBox(f'AlignPin failed jct {joint_num} body {pin_idx}: {e_pin}\n'
-                                      f'{traceback.format_exc()}')
-
-        except Exception as e_bore:
+        if female_idx is None or fy_b is None:
             if ui:
-                ui.messageBox(f'CollarBore failed (jct {joint_num}):\n'
-                              f'{e_bore}\n{traceback.format_exc()}')
+                ui.messageBox(f'WallSnap jct {joint_num}: need 2 bodies + coords, skipping')
+        else:
+            male_body   = track_pairs[male_idx][0]
+            female_body = track_pairs[female_idx][0]
+            male_face   = track_pairs[male_idx][1]
 
-    # Phase 3: socket cuts + H-key — skipped in bore mode (bolt replaces H-key lock)
-    if LOCK_STYLE != 'bore':
+            # Record male/female CoM so alternation can be verified from the JSON
+            # alone: match pieces across junctions by CoM proximity — every piece
+            # should appear as male at one junction and female at another.
+            try:
+                _mc = male_body.physicalProperties.centerOfMass
+                ws_rec['male_com'] = [round(_mc.x, 3), round(_mc.y, 3), round(_mc.z, 3)]
+            except Exception:
+                ws_rec['male_com'] = None
+            try:
+                _fc2 = female_body.physicalProperties.centerOfMass
+                ws_rec['female_com'] = [round(_fc2.x, 3), round(_fc2.y, 3), round(_fc2.z, 3)]
+            except Exception:
+                ws_rec['female_com'] = None
+
+            # Female side along +cut_normal: prefer the male face's outward normal
+            # (points away from male → toward female); fall back to CoM.
+            def _female_dir():
+                try:
+                    if (male_face is not None and male_face.geometry.surfaceType ==
+                            adsk.core.SurfaceTypes.PlaneSurfaceType):
+                        n = male_face.geometry.normal.copy()
+                        if male_face.isParamReversed:
+                            n.scaleBy(-1.0)
+                        d = (n.x * cut_normal.x + n.y * cut_normal.y +
+                             n.z * cut_normal.z)
+                        if abs(d) > 0.3:
+                            return 1.0 if d > 0 else -1.0
+                except Exception:
+                    pass
+                c = female_body.physicalProperties.centerOfMass
+                d = ((c.x - cut_origin.x) * cut_normal.x +
+                     (c.y - cut_origin.y) * cut_normal.y +
+                     (c.z - cut_origin.z) * cut_normal.z)
+                return 1.0 if d >= 0 else -1.0
+            z_fem = _female_dir()
+
+            # ── Stage 1: verify path-station math (no geometry change yet) ────
+            # The sweep rewrite will place tongue/barb/pocket/window at true path
+            # stations.  Before building it, confirm: (a) junction j really sits
+            # at path ratio j/num_pieces (path_origin ≈ cut_origin), and (b) which
+            # ratio direction (+/-) points toward the female piece — cut_normal
+            # can't tell us (its sign alternates), so we sample the path and test
+            # proximity to female_com.
+            def _path_sample(ratio):
+                """Return (origin, normal) of a plane at `ratio` along the path."""
+                r = max(0.0, min(1.0, ratio))
+                cin = root.constructionPlanes.createInput()
+                cin.setByDistanceOnPath(path, adsk.core.ValueInput.createByReal(r))
+                pl = root.constructionPlanes.add(cin)
+                o = pl.geometry.origin.copy()
+                n = pl.geometry.normal.copy()
+                try: pl.deleteMe()
+                except Exception: pass
+                return o, n
+
+            pdiag = {'have_path': path is not None, 'num_pieces': num_pieces,
+                     'r_i': None, 'path_origin': None,
+                     'origin_err': None, 'female_ratio_sign': None,
+                     'dr_lap': None}
+            if path is not None and num_pieces:
+                try:
+                    r_i = float(joint_num) / float(num_pieces)
+                    pdiag['r_i'] = round(r_i, 5)
+                    o0, _n0 = _path_sample(r_i)
+                    pdiag['path_origin'] = [round(o0.x, 3), round(o0.y, 3), round(o0.z, 3)]
+                    pdiag['origin_err'] = round(
+                        ((o0.x - cut_origin.x) ** 2 + (o0.y - cut_origin.y) ** 2 +
+                         (o0.z - cut_origin.z) ** 2) ** 0.5, 4)
+                    # ratio span of one lap length, for placing trim planes later
+                    if path_len and path_len > 0:
+                        pdiag['dr_lap'] = round(SNAP_LAP_LEN / path_len, 6)
+                    # which direction in ratio is toward female?  Sample ±a small
+                    # step and compare to female_com.
+                    fc = female_body.physicalProperties.centerOfMass
+                    dr = (SNAP_LAP_LEN / path_len) if (path_len and path_len > 0) else 0.02
+                    op, _ = _path_sample(r_i + dr)
+                    om, _ = _path_sample(r_i - dr)
+                    dp = (op.x - fc.x) ** 2 + (op.y - fc.y) ** 2 + (op.z - fc.z) ** 2
+                    dm = (om.x - fc.x) ** 2 + (om.y - fc.y) ** 2 + (om.z - fc.z) ** 2
+                    pdiag['female_ratio_sign'] = 1 if dp < dm else -1
+                except Exception as _e_pd:
+                    pdiag['error'] = str(_e_pd)
+            ws_rec['path_diag'] = pdiag
+
+            # Tongue/pocket height band: most of the wall height (compliant finger).
+            _ya = fy_b - inward_b * (wt - SNAP_Y0_INSET)        # near outer floor
+            _yb = fy_b + inward_b * (ch_h - SNAP_Y1_INSET)      # near channel top
+            ylo, yhi = (_ya, _yb) if _ya < _yb else (_yb, _ya)
+
+            def _rect_profile(sk, xa, xb, ya, yb):
+                """Draw a rectangle in sketch-local coords; return its profile."""
+                xlo, xhi = (xa, xb) if xa < xb else (xb, xa)
+                yl,  yh  = (ya, yb) if ya < yb else (yb, ya)
+                L = sk.sketchCurves.sketchLines
+                L.addByTwoPoints(P3(xlo, yl, 0), P3(xhi, yl, 0))
+                L.addByTwoPoints(P3(xhi, yl, 0), P3(xhi, yh, 0))
+                L.addByTwoPoints(P3(xhi, yh, 0), P3(xlo, yh, 0))
+                L.addByTwoPoints(P3(xlo, yh, 0), P3(xlo, yl, 0))
+                best, best_a = None, 1e18
+                for i in range(sk.profiles.count):
+                    p  = sk.profiles.item(i); bb = p.boundingBox
+                    a  = ((bb.maxPoint.x - bb.minPoint.x) *
+                          (bb.maxPoint.y - bb.minPoint.y))
+                    if a < best_a:
+                        best_a, best = a, p
+                return best
+
+            def _rect_profile_xf(sk, src_xform, xa, xb, ya, yb):
+                """Draw a rectangle whose corners are given in the cut_plane frame
+                (src_xform), re-expressed in `sk`'s own frame.  Offset construction
+                planes get an arbitrary 2-D origin/axes, so coords must be routed
+                through world space — drawing raw (x,y) on them floats the result."""
+                inv = sk.transform.copy(); inv.invert()
+                def _loc(x, y):
+                    p = adsk.core.Point3D.create(x, y, 0)
+                    p.transformBy(src_xform)   # cut-plane local → world
+                    p.transformBy(inv)         # world → this sketch's local
+                    return adsk.core.Point3D.create(p.x, p.y, 0)  # project onto plane
+                xlo, xhi = (xa, xb) if xa < xb else (xb, xa)
+                yl,  yh  = (ya, yb) if ya < yb else (yb, ya)
+                corners = [_loc(xlo, yl), _loc(xhi, yl), _loc(xhi, yh), _loc(xlo, yh)]
+                L = sk.sketchCurves.sketchLines
+                for i in range(4):
+                    L.addByTwoPoints(corners[i], corners[(i + 1) % 4])
+                best, best_a = None, 1e18
+                for i in range(sk.profiles.count):
+                    p  = sk.profiles.item(i); bb = p.boundingBox
+                    a  = ((bb.maxPoint.x - bb.minPoint.x) *
+                          (bb.maxPoint.y - bb.minPoint.y))
+                    if a < best_a:
+                        best_a, best = a, p
+                return best
+
+            def _toward_female(sk):
+                """True if the sketch's +local-Z points toward the female side."""
+                t = sk.transform
+                zc = (t.getCell(0, 2) * cut_normal.x +
+                      t.getCell(1, 2) * cut_normal.y +
+                      t.getCell(2, 2) * cut_normal.z)
+                return (zc > 0) == (z_fem > 0)
+
+            def _offset_plane(comp, depth):
+                """Plane parallel to cut_plane, `depth` toward the female side."""
+                cin = comp.constructionPlanes.createInput()
+                cin.setByOffset(cut_plane,
+                                adsk.core.ValueInput.createByReal(z_fem * depth))
+                pl = comp.constructionPlanes.add(cin)
+                pl.isLightBulbOn = False
+                return pl
+
+            def _refetch(b):
+                nm = b.name
+                for _b in _all_bodies(root):
+                    if _b.name == nm:
+                        return _b
+                return b
+
+            def _bbw(b):
+                """World bounding box of a body as [minx,miny,minz,maxx,maxy,maxz]."""
+                try:
+                    bb = b.boundingBox
+                    return [round(bb.minPoint.x, 4), round(bb.minPoint.y, 4),
+                            round(bb.minPoint.z, 4), round(bb.maxPoint.x, 4),
+                            round(bb.maxPoint.y, 4), round(bb.maxPoint.z, 4)]
+                except Exception:
+                    return None
+
+            # ── PATH-FOLLOWING (loft) wall-snap ───────────────────────────────
+            # On curves a straight lap drifts off the wall (barb/window miss it).
+            # Here every feature is lofted through cross-section profiles placed at
+            # TRUE path stations (setByDistanceOnPath), so tongue/pocket/barb/window
+            # all follow the curved wall and stay mutually aligned.  Falls back to
+            # the straight loop below when the path isn't available.
+            _use_sweep = (path is not None and num_pieces and
+                          pdiag.get('origin_err') is not None and
+                          pdiag['origin_err'] < 0.05 and
+                          pdiag.get('r_i') is not None and
+                          pdiag.get('female_ratio_sign') is not None and
+                          path_len and path_len > 0)
+            if _use_sweep:
+                r_i = pdiag['r_i']
+                sgn = pdiag['female_ratio_sign']   # +/- ratio dir toward female
+                Lp  = path_len
+                _NB = adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+                _JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
+                _CUT  = adsk.fusion.FeatureOperations.CutFeatureOperation
+                cz1  = detect_tr.getCell(2, 1)                 # local-y → world-z
+                Xl0  = (detect_tr.getCell(0, 0), detect_tr.getCell(1, 0))
+                Rt0x, Rt0y = cut_normal.y, -cut_normal.x       # path-right at jct
+                _r0 = (Rt0x * Rt0x + Rt0y * Rt0y) ** 0.5 or 1.0
+                Rt0x /= _r0; Rt0y /= _r0
+                s0 = 1.0 if (Xl0[0] * Rt0x + Xl0[1] * Rt0y) >= 0 else -1.0
+
+                def _station_profile(dist, mag_lo, mag_hi, yl, yh, rside, name):
+                    """Rect profile on a plane ⟂ the path at along-path `dist` from
+                    the junction (dist>0 = toward female).  mag = |offset| from the
+                    path centreline in the width direction; rside = which side."""
+                    ratio = max(0.0, min(1.0, r_i + sgn * dist / Lp))
+                    cin = root.constructionPlanes.createInput()
+                    cin.setByDistanceOnPath(
+                        path, adsk.core.ValueInput.createByReal(ratio))
+                    pl = root.constructionPlanes.add(cin)
+                    pl.isLightBulbOn = False
+                    sk = root.sketches.add(pl)
+                    sk.name = name; sk.isLightBulbOn = False
+                    O = pl.geometry.origin; N = pl.geometry.normal
+                    rtx, rty = N.y, -N.x
+                    _rl = (rtx * rtx + rty * rty) ** 0.5 or 1.0
+                    rtx /= _rl; rty /= _rl
+                    inv = sk.transform.copy(); inv.invert()
+                    def _c(mag, ly):
+                        p = adsk.core.Point3D.create(
+                            O.x + rtx * rside * mag,
+                            O.y + rty * rside * mag,
+                            cut_origin.z + cz1 * ly)
+                        p.transformBy(inv)
+                        return adsk.core.Point3D.create(p.x, p.y, 0)
+                    corners = [_c(mag_lo, yl), _c(mag_hi, yl),
+                               _c(mag_hi, yh), _c(mag_lo, yh)]
+                    Lc = sk.sketchCurves.sketchLines
+                    for i in range(4):
+                        Lc.addByTwoPoints(corners[i], corners[(i + 1) % 4])
+                    best, ba = None, 1e18
+                    for i in range(sk.profiles.count):
+                        p = sk.profiles.item(i); bb = p.boundingBox
+                        a = ((bb.maxPoint.x - bb.minPoint.x) *
+                             (bb.maxPoint.y - bb.minPoint.y))
+                        if a < ba:
+                            ba, best = a, p
+                    return best
+
+                def _loft(dists, mag_lo, mag_hi, yl, yh, rside, name):
+                    lin = root.features.loftFeatures.createInput(_NB)
+                    lin.isSolid = True
+                    for k, dist in enumerate(dists):
+                        pr = _station_profile(dist, mag_lo, mag_hi, yl, yh,
+                                              rside, f'{name}_{k}')
+                        if pr is None:
+                            return None
+                        lin.loftSections.add(pr)
+                    lf = root.features.loftFeatures.add(lin)
+                    return lf.bodies.item(0) if lf.bodies.count > 0 else None
+
+                def _combine(target, tool, op):
+                    tc = adsk.core.ObjectCollection.create()
+                    tc.add(tool)
+                    ci = root.features.combineFeatures.createInput(target, tc)
+                    ci.operation = op
+                    root.features.combineFeatures.add(ci)
+
+                LAP  = SNAP_LAP_LEN; TT = SNAP_TONGUE_T; CL = SNAP_CL
+                BL   = SNAP_BARB_LEN; BX = SNAP_BARB_X; BOSS_OWN = 0.30
+                ih   = inner_hw
+                # Extra DEPTH the female pocket/window run PAST the tongue/barb tips
+                # (along the track).  FDM prints protrusions a hair long + pockets a
+                # hair shallow, so with only CL clearance the tongue tip bottoms in
+                # the wall pocket before the flat floor/outer-wall butt faces meet →
+                # walls held apart while the floor closes.  0.5 mm of relief here
+                # makes the butt faces (not the tongue) the seating stop.  Only the
+                # far end grows; the catch face + cross-section fit are unchanged.
+                POCKET_CLR = 0.05
+                for wsign in (1.0, -1.0):
+                    wlab = 'R' if wsign > 0 else 'L'
+                    wrec = {'wall': wlab, 'method': 'loft',
+                            'pocket_removed': None, 'window_removed': None,
+                            'tongue_ok': False, 'barb_ok': False,
+                            'error': None, 'diag': {}}
+                    try:
+                        rside = s0 * wsign
+                        # tongue-band mags (|offset| from centreline, width dir)
+                        m_ti, m_to = ih, ih + TT            # tongue band
+                        # Window floor is DERIVED from the barb (see the constant
+                        # block): deep enough for the barb to spring clear, no
+                        # deeper, so the outer-wall skin stays printable.
+                        m_wo = ih + SNAP_WIN_FLOOR
+                        # Barb band — centred on the tongue, SHORTER than it, so
+                        # it drops into the window with real clearance.
+                        yb0 = (ylo + yhi) * 0.5 - SNAP_BARB_H * 0.5
+                        yb1 = (ylo + yhi) * 0.5 + SNAP_BARB_H * 0.5
+                        # Shared, DENSE lap stations (dist along path).  Tongue and
+                        # pocket MUST loft through the SAME interior stations, or on a
+                        # curve their ruled surfaces chord across the arc by DIFFERENT
+                        # amounts (tongue starts back at -BOSS_OWN, pocket at -CL) →
+                        # the gap opens well past CL → loose joint on bends, even
+                        # though straight joints (colinear sections) stay tight.  With
+                        # matched stations the two surfaces stay exactly CL apart.
+                        _lap_st = [0.0, LAP*0.2, LAP*0.4, LAP*0.6, LAP*0.8, LAP]
+                        # ── FEMALE cuts: pocket (inner half) + window (outer slab)
+                        female_body = _refetch(female_body)
+                        _vf0 = female_body.physicalProperties.volume
+                        pk = _loft([-CL] + _lap_st + [LAP + POCKET_CLR],
+                                   m_ti - CL, m_to + CL, ylo - CL, yhi + CL,
+                                   rside, f'SnapPocket_{joint_num}_{wlab}')
+                        if pk is not None:
+                            _combine(_refetch(female_body), _refetch(pk), _CUT)
+                            female_body = _refetch(female_body)
+                            wrec['pocket_removed'] = round(
+                                _vf0 - female_body.physicalProperties.volume, 5)
+                        _vf1 = female_body.physicalProperties.volume
+                        wn = _loft([LAP - BL - CL, LAP + POCKET_CLR],
+                                   m_to, m_wo,
+                                   yb0 - SNAP_BARB_ZCL, yb1 + SNAP_BARB_ZCL,
+                                   rside, f'SnapWindow_{joint_num}_{wlab}')
+                        if wn is not None:
+                            _combine(_refetch(female_body), _refetch(wn), _CUT)
+                            female_body = _refetch(female_body)
+                            wrec['window_removed'] = round(
+                                _vf1 - female_body.physicalProperties.volume, 5)
+                        # ── MALE adds: tongue (inner half) + barb (catch step) ───
+                        tongue = _loft([-BOSS_OWN] + _lap_st,
+                                       m_ti, m_to, ylo, yhi,
+                                       rside, f'SnapTongue_{joint_num}_{wlab}')
+                        if tongue is not None:
+                            _combine(_refetch(male_body), _refetch(tongue), _JOIN)
+                            male_body = _refetch(male_body)
+                            wrec['tongue_ok'] = True
+                            wrec['diag']['tongue_bbox_world'] = _bbw(male_body)
+                        # barb spans inner half (bridges to tongue) + step into slab.
+                        # Ramp the OUTER step from full (m_to+BX) at the proximal/
+                        # catch station down to flush (m_to) at the insertion tip:
+                        # the tip cams the tongue in smoothly on assembly, while the
+                        # proximal end-cap stays a square (90°) face that can't slide
+                        # back out under pull.  Inner edge (m_ti) and height stay
+                        # constant so only the protruding step tapers.
+                        barb = None
+                        _bl_in = root.features.loftFeatures.createInput(_NB)
+                        _bl_in.isSolid = True
+                        _pr_prox = _station_profile(
+                            LAP - BL, m_ti, m_to + BX, yb0, yb1, rside,
+                            f'SnapBarb_{joint_num}_{wlab}_0')   # full step (catch)
+                        _pr_tip = _station_profile(
+                            LAP, m_ti, m_to, yb0, yb1, rside,
+                            f'SnapBarb_{joint_num}_{wlab}_1')    # flush (lead-in)
+                        if _pr_prox is not None and _pr_tip is not None:
+                            _bl_in.loftSections.add(_pr_prox)
+                            _bl_in.loftSections.add(_pr_tip)
+                            _bf = root.features.loftFeatures.add(_bl_in)
+                            barb = _bf.bodies.item(0) if _bf.bodies.count > 0 else None
+                        if barb is not None:
+                            _combine(_refetch(male_body), _refetch(barb), _JOIN)
+                            male_body = _refetch(male_body)
+                            wrec['barb_ok'] = True
+                        success = True
+                    except Exception as _e_ws:
+                        wrec['error'] = str(_e_ws)
+                        if ui:
+                            ui.messageBox(
+                                f'WallSnap(loft) failed (jct {joint_num}, {wlab}):\n'
+                                f'{_e_ws}\n{traceback.format_exc()}')
+                    ws_rec['walls'].append(wrec)
+
+            for wsign in (1.0, -1.0) if not _use_sweep else []:
+                wlab = 'R' if wsign > 0 else 'L'
+                wrec = {'wall': wlab, 'pocket_removed': None,
+                        'window_removed': None, 'tongue_ok': False,
+                        'barb_ok': False, 'error': None, 'diag': {}}
+                try:
+                    x_in  = wsign * inner_hw                 # channel-side wall face
+                    x_out = wsign * (inner_hw + wt)          # outer wall face
+                    x_tng = x_in + wsign * SNAP_TONGUE_T     # tongue/backing split
+                    # Window floor derived from the barb — see the loft path above.
+                    x_win = x_in + wsign * SNAP_WIN_FLOOR
+                    # Barb band: centred on the tongue, shorter than it.
+                    yb0 = (ylo + yhi) * 0.5 - SNAP_BARB_H * 0.5
+                    yb1 = (ylo + yhi) * 0.5 + SNAP_BARB_H * 0.5
+
+                    # ── FEMALE: pocket (clear inner half over the lap) ────────
+                    fcomp = female_body.parentComponent
+                    fex   = fcomp.features.extrudeFeatures
+                    female_body = _refetch(female_body)
+                    sk_p = fcomp.sketches.add(cut_plane)
+                    sk_p.name = f'SnapPocket_{joint_num}_{wlab}'
+                    sk_p.isLightBulbOn = False
+                    cxf_f = sk_p.transform.copy()    # cut_plane frame (female comp)
+                    pr_p = _rect_profile(sk_p,
+                                         x_in - wsign * SNAP_CL,
+                                         x_tng + wsign * SNAP_CL,
+                                         ylo - SNAP_CL, yhi + SNAP_CL)
+
+                    # ── Diagnostics: pin down why a wall removes 0 ────────────
+                    # cxf_f maps cut-plane local (x,y,0) → world.  We log the
+                    # local-X world axis (flip check), z_fem, the rectangle's
+                    # world corners, the female-body world bbox, and the profile
+                    # count/centre — enough to tell a frame-flip from a curvature
+                    # miss from a min-area mis-pick without a screenshot.
+                    try:
+                        def _w(x, y):
+                            p = adsk.core.Point3D.create(x, y, 0)
+                            p.transformBy(cxf_f)
+                            return [round(p.x, 4), round(p.y, 4), round(p.z, 4)]
+                        _xlo = x_in - wsign * SNAP_CL
+                        _xhi = x_tng + wsign * SNAP_CL
+                        _corners = [_w(_xlo, ylo - SNAP_CL), _w(_xhi, ylo - SNAP_CL),
+                                    _w(_xhi, yhi + SNAP_CL), _w(_xlo, yhi + SNAP_CL)]
+                        _pc = None
+                        if pr_p is not None:
+                            try:
+                                _pbb = pr_p.boundingBox
+                                _pc = [round((_pbb.minPoint.x + _pbb.maxPoint.x) / 2, 4),
+                                       round((_pbb.minPoint.y + _pbb.maxPoint.y) / 2, 4),
+                                       round((_pbb.minPoint.z + _pbb.maxPoint.z) / 2, 4)]
+                            except Exception:
+                                pass
+                        wrec['diag'] = {
+                            'wsign': wsign,
+                            'x_in': round(x_in, 4), 'x_tng': round(x_tng, 4),
+                            'z_fem': z_fem,
+                            'local_x_world': [round(cxf_f.getCell(0, 0), 4),
+                                              round(cxf_f.getCell(1, 0), 4),
+                                              round(cxf_f.getCell(2, 0), 4)],
+                            'cut_normal': [round(cut_normal.x, 4),
+                                           round(cut_normal.y, 4),
+                                           round(cut_normal.z, 4)],
+                            'pocket_rect_world': _corners,
+                            'pocket_profiles_count': sk_p.profiles.count,
+                            'pocket_profile_found': pr_p is not None,
+                            'pocket_profile_centre_world': _pc,
+                            'female_bbox_world': _bbw(female_body),
+                            'female_com_world': None,
+                        }
+                        try:
+                            _fc = female_body.physicalProperties.centerOfMass
+                            wrec['diag']['female_com_world'] = [
+                                round(_fc.x, 4), round(_fc.y, 4), round(_fc.z, 4)]
+                        except Exception:
+                            pass
+                    except Exception as _e_diag:
+                        wrec['diag']['diag_error'] = str(_e_diag)
+
+                    vb = female_body.physicalProperties.volume
+                    ei = fex.createInput(
+                        pr_p, adsk.fusion.FeatureOperations.CutFeatureOperation)
+                    ei.setSymmetricExtent(
+                        adsk.core.ValueInput.createByReal(SNAP_LAP_LEN + SNAP_CL),
+                        False)
+                    ei.participantBodies = [female_body]
+                    fex.add(ei)
+                    female_body = _refetch(female_body)
+                    wrec['pocket_removed'] = round(
+                        vb - female_body.physicalProperties.volume, 5)
+
+                    # ── FEMALE: window (open backing at far slab for the barb) ─
+                    pw = _offset_plane(
+                        fcomp, SNAP_LAP_LEN - SNAP_BARB_LEN - SNAP_CL)
+                    sk_w = fcomp.sketches.add(pw)
+                    sk_w.name = f'SnapWindow_{joint_num}_{wlab}'
+                    sk_w.isLightBulbOn = False
+                    pr_w = _rect_profile_xf(sk_w, cxf_f, x_tng, x_win,
+                                            yb0 - SNAP_BARB_ZCL,
+                                            yb1 + SNAP_BARB_ZCL)
+                    vb = female_body.physicalProperties.volume
+                    eiw = fex.createInput(
+                        pr_w, adsk.fusion.FeatureOperations.CutFeatureOperation)
+                    eiw.setDistanceExtent(
+                        _toward_female(sk_w),
+                        adsk.core.ValueInput.createByReal(
+                            SNAP_BARB_LEN + 2 * SNAP_CL))
+                    eiw.participantBodies = [female_body]
+                    fex.add(eiw)
+                    female_body = _refetch(female_body)
+                    wrec['window_removed'] = round(
+                        vb - female_body.physicalProperties.volume, 5)
+
+                    # ── MALE: tongue + barb ───────────────────────────────────
+                    # Built as NEW BODIES, then merged into the male body ONLY via
+                    # an explicit combineFeatures.  A plain JoinFeatureOperation
+                    # extrude welds to EVERY body it touches (can't be restricted),
+                    # which fused adjacent pieces — combine with an explicit target
+                    # guarantees the female piece is never consumed.
+                    mcomp = male_body.parentComponent
+                    mex   = mcomp.features.extrudeFeatures
+                    combs = mcomp.features.combineFeatures
+                    male_body = _refetch(male_body)
+                    sk_t = mcomp.sketches.add(cut_plane)
+                    sk_t.name = f'SnapTongue_{joint_num}_{wlab}'
+                    sk_t.isLightBulbOn = False
+                    cxf_m = sk_t.transform.copy()    # cut_plane frame (male comp)
+                    pr_t = _rect_profile(sk_t, x_in, x_tng, ylo, yhi)
+                    d_lap_a = adsk.fusion.DistanceExtentDefinition.create(
+                        adsk.core.ValueInput.createByReal(SNAP_LAP_LEN))
+                    d_lap_b = adsk.fusion.DistanceExtentDefinition.create(
+                        adsk.core.ValueInput.createByReal(SNAP_LAP_LEN))
+                    eit = mex.createInput(
+                        pr_t, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+                    eit.setTwoSidesExtent(d_lap_a, d_lap_b)
+                    ft = mex.add(eit)
+                    t_body = ft.bodies.item(0)
+                    t_body.name = f'SnapTBody_{joint_num}_{wlab}'
+                    wrec['tongue_ok'] = True
+
+                    # barb: bump on tongue tip → springs into the window.
+                    pb = _offset_plane(mcomp, SNAP_LAP_LEN - SNAP_BARB_LEN)
+                    sk_b = mcomp.sketches.add(pb)
+                    sk_b.name = f'SnapBarb_{joint_num}_{wlab}'
+                    sk_b.isLightBulbOn = False
+                    pr_b = _rect_profile_xf(
+                        sk_b, cxf_m, x_tng - wsign * SNAP_BARB_OVL,
+                        x_tng + wsign * SNAP_BARB_X, yb0, yb1)
+                    eib = mex.createInput(
+                        pr_b, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+                    # Sketch is on the offset plane = barb's PROXIMAL (catch) face.
+                    # Extrude toward the tip with a negative taper so the catch face
+                    # stays full-size (square, grips the window) while the insertion
+                    # tip ramps in — flexes the tongue smoothly on assembly.
+                    _barb_dir = (adsk.fusion.ExtentDirections.PositiveExtentDirection
+                                 if _toward_female(sk_b)
+                                 else adsk.fusion.ExtentDirections.NegativeExtentDirection)
+                    eib.setOneSideExtent(
+                        adsk.fusion.DistanceExtentDefinition.create(
+                            adsk.core.ValueInput.createByReal(SNAP_BARB_LEN)),
+                        _barb_dir,
+                        adsk.core.ValueInput.createByString(f'-{SNAP_BARB_RAMP} deg'))
+                    fb = mex.add(eib)
+                    b_body = fb.bodies.item(0)
+                    b_body.name = f'SnapBBody_{joint_num}_{wlab}'
+                    wrec['barb_ok'] = True
+
+                    # ── Diagnostics: does the barb actually land in the window? ──
+                    # Project CoMs onto cut_normal (along-path distance from the
+                    # junction).  Barb and window should both centre at
+                    # z_fem*(LAP - BARB_LEN/2); the tongue is symmetric so ~0.
+                    try:
+                        def _along(pt):
+                            return round((pt.x - cut_origin.x) * cut_normal.x +
+                                         (pt.y - cut_origin.y) * cut_normal.y +
+                                         (pt.z - cut_origin.z) * cut_normal.z, 4)
+                        _tc = t_body.physicalProperties.centerOfMass
+                        _bc = b_body.physicalProperties.centerOfMass
+                        wrec['diag']['tongue_com_along'] = _along(_tc)
+                        wrec['diag']['barb_com_along']   = _along(_bc)
+                        wrec['diag']['barb_window_along_expected'] = round(
+                            z_fem * (SNAP_LAP_LEN - SNAP_BARB_LEN / 2), 4)
+                        wrec['diag']['window_depth_range'] = [
+                            round(z_fem * (SNAP_LAP_LEN - SNAP_BARB_LEN - SNAP_CL), 4),
+                            round(z_fem * (SNAP_LAP_LEN + SNAP_CL), 4)]
+                        wrec['diag']['tongue_bbox_world'] = _bbw(t_body)
+                        wrec['diag']['barb_bbox_world']   = _bbw(b_body)
+                    except Exception as _e_bd:
+                        wrec['diag']['barb_diag_error'] = str(_e_bd)
+
+                    # Merge barb into tongue, then tongue(+barb) into male ONLY.
+                    # Re-fetch by name before each createInput — a preceding
+                    # NewBody add silently staleness the body pointers (MEMORY.md).
+                    t_body = _refetch(t_body)
+                    tc1 = adsk.core.ObjectCollection.create()
+                    tc1.add(_refetch(b_body))
+                    ci1 = combs.createInput(t_body, tc1)
+                    ci1.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+                    combs.add(ci1)
+
+                    male_body = _refetch(male_body)
+                    t_body    = _refetch(t_body)
+                    tc2 = adsk.core.ObjectCollection.create()
+                    tc2.add(t_body)
+                    ci2 = combs.createInput(male_body, tc2)
+                    ci2.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+                    combs.add(ci2)
+                    male_body = _refetch(male_body)
+
+                    success = True
+                except Exception as _e_ws:
+                    wrec['error'] = str(_e_ws)
+                    if ui:
+                        ui.messageBox(
+                            f'WallSnap failed (jct {joint_num}, wall {wlab}):\n'
+                            f'{_e_ws}\n{traceback.format_exc()}')
+                ws_rec['walls'].append(wrec)
+
+    # Step 4b: bore and nut trap are now handled inline in Step 4 (boss branch
+    # cuts bore into boss_body_new before combine; nut branch cuts trap into
+    # combined body after combine).  Nothing to do here.
+    if False and LOCK_STYLE == 'vscrew' and track_bodies:
+        VBORE_R   = 0.17    # 1.7 mm radius = 3.4 mm dia (M3 clearance)
+        M3_NUT_CR = 0.328   # M3 nut circumradius (AF=5.5 mm + 0.1 mm tol)
+        M3_NUT_D  = 0.24    # M3 nut height 2.4 mm; trap bites into nut pad → 2.6 mm floor below
+
+        # Use Step 4's recorded indices — avoids CoM re-identification which
+        # fails at hairpins where both bodies' CoMs land on the same side.
+        upper_body = None; lower_body = None
+        if lower_track_idx is not None and lower_track_idx < len(track_bodies):
+            lower_body = track_bodies[lower_track_idx]
+        if upper_track_idx is not None and upper_track_idx < len(track_bodies):
+            upper_body = track_bodies[upper_track_idx]
+        # If one assignment is missing (combine was skipped), assign the other body
+        if lower_body is None and upper_body is not None and len(track_bodies) == 2:
+            lower_body = track_bodies[1 - upper_track_idx]
+        if upper_body is None and lower_body is not None and len(track_bodies) == 2:
+            upper_body = track_bodies[1 - lower_track_idx]
+
+        if upper_body is None or lower_body is None:
+            if ui:
+                ui.messageBox(f'VBore jct {joint_num}: cannot identify upper/lower bodies '
+                               f'(lower_idx={lower_track_idx}, upper_idx={upper_track_idx})')
+        else:
+            # Bore/nut centre is at _NUT_INSET (≈3.48mm) into the nut piece —
+            # matches the boss midpoint so collar, bore, and nut trap are co-axial.
+            _nut_sign   = 1.0 if is_lower_pos else -1.0
+            bore_cx = cut_origin.x + _nut_sign * _NUT_INSET * cut_normal.x
+            bore_cy = cut_origin.y + _nut_sign * _NUT_INSET * cut_normal.y
+
+            def _bore_plane_at(height):
+                """Plane at world Z = cut_origin.z + height via XY-plane offset.
+                Track is flat in XY so iy = world +Z; sketch-Z of the resulting
+                plane = +iy.  Bore cuts use isPositive=False → -iy = downward."""
+                cp_in = root.constructionPlanes.createInput()
+                cp_in.setByOffset(
+                    root.xYConstructionPlane,
+                    adsk.core.ValueInput.createByReal(cut_origin.z + height))
+                cp = root.constructionPlanes.add(cp_in)
+                cp.isLightBulbOn = False
+                return cp
+
+            def _bore_cut_at(body, height, bore_depth, bore_name):
+                """Circle bore at junction centre (cut_origin.x/y), cutting in -iy."""
+                cp = _bore_plane_at(height)
+                sk = root.sketches.add(cp)
+                sk.name = bore_name
+                sk.isLightBulbOn = False
+                sk.sketchCurves.sketchCircles.addByCenterRadius(
+                    adsk.core.Point3D.create(bore_cx, bore_cy, 0), VBORE_R)
+                if sk.profiles.count == 0:
+                    if ui: ui.messageBox(f'{bore_name}: bore profile empty')
+                    return False
+                best_bp = min(
+                    [sk.profiles.item(i) for i in range(sk.profiles.count)],
+                    key=lambda p: ((p.boundingBox.maxPoint.x-p.boundingBox.minPoint.x)*
+                                   (p.boundingBox.maxPoint.y-p.boundingBox.minPoint.y)))
+                # Determine direction dynamically: cut in -iy (downward toward outer floor).
+                # skz_iy > 0 → sketch-Z = +iy → isPositive=False cuts in -iy ✓
+                # skz_iy < 0 → sketch-Z = -iy → isPositive=True  cuts in -iy ✓
+                sk_tr  = sk.transform
+                skz_iy = (sk_tr.getCell(0,2)*iy.x +
+                          sk_tr.getCell(1,2)*iy.y +
+                          sk_tr.getCell(2,2)*iy.z)
+                ei = extrudes.createInput(
+                    best_bp, adsk.fusion.FeatureOperations.CutFeatureOperation)
+                ei.setDistanceExtent(skz_iy < 0,
+                                     adsk.core.ValueInput.createByReal(bore_depth))
+                ei.participantBodies = [body]
+                extrudes.add(ei)
+                return True
+
+            # ── Bore: boss body only ──────────────────────────────────────────
+            # Bore from collar top downward through boss material only.
+            # Boss spans [fy_boss_b, fy_top]; depth = COLLAR_H - NUT_PAD_H - PAD_CLR.
+            # The bolt falls freely across the PAD_CLR gap before entering the nut trap.
+            try:
+                _boss_bore_depth = COLLAR_H - NUT_PAD_H - PAD_CLR
+                if _bore_cut_at(upper_body, wt + COLLAR_H, _boss_bore_depth,
+                                f'VBore_{joint_num}_upper'):
+                    success = True
+            except Exception as e_u:
+                if ui:
+                    ui.messageBox(f'VBore upper failed (jct {joint_num}):\n'
+                                  f'{e_u}\n{traceback.format_exc()}')
+
+            # ── Nut trap: nut pad top face (lower body) ───────────────────────
+            # Sketch in free air at wt+COLLAR_H (avoids on-face profile failure).
+            # Depth = COLLAR_H - NUT_PAD_H + M3_NUT_D: traverses air gap, enters
+            # nut pad at its top, bites M3_NUT_D deep → 2.6 mm solid floor below.
+            try:
+                nut_cp = _bore_plane_at(wt + COLLAR_H)
+                nut_sk = root.sketches.add(nut_cp)
+                nut_sk.name = f'NutTrap_{joint_num}'
+                nut_sk.isLightBulbOn = False
+                sk_ln = nut_sk.sketchCurves.sketchLines
+                for i in range(6):
+                    a = adsk.core.Point3D.create(
+                        bore_cx + M3_NUT_CR*math.cos( i   *math.pi/3 + math.pi/6),
+                        bore_cy + M3_NUT_CR*math.sin( i   *math.pi/3 + math.pi/6), 0)
+                    b = adsk.core.Point3D.create(
+                        bore_cx + M3_NUT_CR*math.cos((i+1)*math.pi/3 + math.pi/6),
+                        bore_cy + M3_NUT_CR*math.sin((i+1)*math.pi/3 + math.pi/6), 0)
+                    sk_ln.addByTwoPoints(a, b)
+                if nut_sk.profiles.count > 0:
+                    best_np = max(
+                        [nut_sk.profiles.item(i) for i in range(nut_sk.profiles.count)],
+                        key=lambda p: ((p.boundingBox.maxPoint.x-p.boundingBox.minPoint.x)*
+                                       (p.boundingBox.maxPoint.y-p.boundingBox.minPoint.y)))
+                    nt_tr    = nut_sk.transform
+                    skz_iy_n = (nt_tr.getCell(0,2)*iy.x +
+                                nt_tr.getCell(1,2)*iy.y +
+                                nt_tr.getCell(2,2)*iy.z)
+                    _nut_trap_depth = COLLAR_H - NUT_PAD_H + M3_NUT_D
+                    ei_n = extrudes.createInput(
+                        best_np, adsk.fusion.FeatureOperations.CutFeatureOperation)
+                    ei_n.setDistanceExtent(skz_iy_n < 0,   # cut downward (-iy) toward outer floor
+                                           adsk.core.ValueInput.createByReal(_nut_trap_depth))
+                    ei_n.participantBodies = [lower_body]
+                    extrudes.add(ei_n)
+                elif ui:
+                    ui.messageBox(f'NutTrap jct {joint_num}: nut profile empty')
+            except Exception as e_l:
+                if ui:
+                    ui.messageBox(f'NutTrap failed (jct {joint_num}):\n'
+                                   f'{e_l}\n{traceback.format_exc()}')
+
+    # Phase 3: socket cuts + H-key (skipped for vscrew/wallsnap — they replace H-key)
+    if LOCK_STYLE not in ('bore', 'vscrew', 'wallsnap'):
         for body_idx, body in enumerate(track_bodies):
             try:
                 _, sock_prof = _key_profile(
@@ -1972,9 +3087,9 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                     ui.messageBox(f'Socket cut failed (jct {joint_num}, body {body.name}):\n'
                                   f'{e}\n{traceback.format_exc()}')
 
-    # ── H-key body — one per junction (stud mode only) ────────────────────────
+    # ── H-key body — one per junction (stud mode only) ───────────────────────
     key_exists = any(b.name == f'Connector_Key_{joint_num}' for b in root.bRepBodies)
-    if not key_exists and LOCK_STYLE != 'bore':
+    if not key_exists and LOCK_STYLE not in ('bore', 'vscrew', 'wallsnap'):
         try:
             _, key_prof = _key_profile(
                 f'ConnectorKey_{joint_num}',
@@ -1997,7 +3112,805 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None):
                 ui.messageBox(f'Connector_Key creation failed (jct {joint_num}):\n'
                               f'{e}\n{traceback.format_exc()}')
 
-    return success
+    _val_rec['success'] = success
+    return _val_rec
+
+
+# =============================================================================
+# WALL-MOUNT BRACKET  (adjustable standoff, one per junction)
+# =============================================================================
+
+# Master enable — set False to skip wall brackets entirely.
+WALL_BRACKET_ENABLED = True
+
+
+def create_wall_bracket(root, cut_plane, params, joint_num, ui=None,
+                        path=None, path_len=0.0, num_pieces=0, wall_top_z=None):
+    """Add TWO integrated wall-mount standoff feet at a junction.
+
+    Not separate parts — a small boss is grown on EACH wall-tip face at the
+    junction and welded (combineFeatures JOIN) INTO the adjacent track piece, so
+    each foot prints as part of the piece (no standalone body).  Two feet (one
+    per wall) give a stable, symmetric mount per junction.
+
+    Why here and not a plate across the channel: the wall-facing side IS the
+    LED's exit aperture, so any material spanning the inner-channel opening
+    blocks the strip and casts a shadow.  The two 3 mm wall tips are opaque and
+    already shadow the wall, so a boss that stays OVER a wall band (bulging only
+    OUTBOARD, never toward the opening) adds no new obstruction and no shadow.
+
+    ORIENTATION-FREE by design (so one script serves any F1 track in any hang
+    orientation the customer picks): the mount is ISOTROPIC — the screw axis is
+    the track normal (_iyw = wall side), needing no in-plane "up".  Each foot is
+    independent and self-locating (drill/drive straight through its own bore), so
+    a rigid multi-mount loop is never over-constrained.  The bore is OVERSIZED
+    (forgiving) with a wall-side counterbore for a captive nut / heat-set insert
+    + lock nut → standoff set once and locked; the gap (LED diffusion) is pure
+    hardware, no reprint, no geometry encodes it.  cut_at_planes assembles a 1:1
+    drilling template from the returned screw positions.
+
+    Feet are offset ~CONN_CLEAR past the seam so they clear the wallsnap
+    connector (which lives within ±SNAP_LAP_LEN of the seam) — no collision.
+
+    PATH-FOLLOWING: each foot is LOFTED through stations that ride the true path
+    (setByDistanceOnPath), so it hugs the curved wall instead of chording across
+    it as a straight prism did (same fix as the wallsnap loft).  Falls back to a
+    straight extrude when the path isn't available.
+
+    Assumes a flat-XY track (screw axis = world Z); returns a dict record
+    including rec['screws'] = [[x, y], ...] world positions for the template.
+    """
+    rec = {'joint': joint_num, 'success': False, 'screws': []}
+    if not WALL_BRACKET_ENABLED:
+        rec['skipped'] = 'disabled'
+        return rec
+
+    # ── Tunable constants (cm) ────────────────────────────────────────────────
+    wt        = params['WALL_THICKNESS']
+    th        = params['TRACK_HEIGHT']
+    outer_hw  = params['TRACK_WIDTH'] / 2.0                 # outer wall face |x|
+    inner_hw  = (params['TRACK_WIDTH'] - 2.0 * wt) / 2.0    # inner wall face |x|
+
+    # ── Dovetail stud (replaces the bored foot) — coupon-validated 2026-08-03 ─
+    # The foot used to carry an M3 through-bore + counterbore for a screw.  That
+    # is gone: the mount is now a plaque that HOOKS the stud (see
+    # create_wall_plaque_part), so the track carries no holes at all — no light
+    # leak, no 0.5 mm skins, and the screw moved to the plaque's centreline
+    # where it is hidden behind the track.
+    FOOT_LEN   = 1.20    # 12 mm along the track (was 8) = the plaque's grip
+    FOOT_EMBED = 0.30    # 3 mm INTO the wall crest (was 1).  This is the weld:
+                         # 0.25 × 0.30 × 1.20 = 0.090 cm³ of overlap vs 0.020
+                         # before — and the old 1 mm lap left joint 4 with just
+                         # 0.0011 cm³ once the straight stud chorded off the arc.
+    NECK_H     = 0.25    # 2.5 mm of neck above the wall tip (the rail's throat)
+    FLARE      = 0.20    # 45° dovetail rise = run: printable, self-centring
+    IN_MARGIN  = 0.05    # hold the stud 0.5 mm clear of the channel edge so
+                         # curve drift can never push it over the LED aperture
+    CONN_CLEAR = 1.50    # 15 mm past the seam (SNAP_LAP_LEN 1.20 + the 0.5 mm
+                         # pocket relief + margin) so the feet clear the
+                         # wallsnap zone.  Raised from 1.00 when the lap grew
+                         # 8 → 12 mm.  A piece now needs CONN_CLEAR + FOOT_LEN
+                         # of length past each seam to host its feet.
+
+    # No bores in the track any more — the M3 lives in the plaque.  (The old
+    # BORE_R 0.18 / CBORE_R 0.32 / CBORE_D 0.35 are deliberately gone: the
+    # Ø6.4 counterbore was wider than the foot it sat in and broke out through
+    # both the chamfer and the LED channel.)
+
+    # ── Orientation frame ─────────────────────────────────────────────────────
+    detect_sk = root.sketches.add(cut_plane)
+    detect_tr = detect_sk.transform.copy()
+    detect_sk.isLightBulbOn = False
+    try: detect_sk.deleteMe()
+    except Exception: pass
+    cz1  = detect_tr.getCell(2, 1)                    # local-y (floor->wall) -> world-z
+    _ays = 1.0 if cz1 >= 0.0 else -1.0
+    _iyw = adsk.core.Vector3D.create(
+        _ays * detect_tr.getCell(0, 1),
+        _ays * detect_tr.getCell(1, 1),
+        _ays * detect_tr.getCell(2, 1))
+    _iyw.normalize()
+    # v1 assumes a flat-XY track so the floor->wall axis (screw axis) is world Z
+    # — the bores are cut on the permanent xY plane.  _ays makes _iyw always
+    # point +Z here, so the wall side is +Z and the screw goes +Z.
+    if abs(_iyw.z) < 0.9:
+        rec['skipped'] = 'non-flat track (v1 needs flat XY)'
+        return rec
+
+    cut_geom   = cut_plane.geometry
+    cut_origin = cut_geom.origin
+    cut_normal = cut_geom.normal.copy(); cut_normal.normalize()
+
+    def _by_name(name):
+        for b in _all_bodies(root):
+            if b.name == name:
+                return b
+        return None
+
+    # ── Guard: already built here (the master profile sketch persists) ────────
+    try:
+        if root.sketches.itemByName(f'WBMasterProf_{joint_num}') is not None:
+            rec['skipped'] = 'exists'; rec['success'] = True
+            return rec
+    except Exception:
+        pass
+
+    # ── Adjacent track bodies; pick the downstream (+cut_normal) host piece ────
+    # Both feet weld into the SAME piece (offset past the connector on one side
+    # of the seam) — the connector already ties the two pieces together.
+    adjacent    = find_bodies_at_cut(root, cut_plane)
+    track_pairs = [(b, f) for b, f in adjacent if b.name.startswith('Track_')]
+    if not track_pairs:
+        rec['skipped'] = 'no track bodies at cut'
+        return rec
+    rec['track_bodies'] = len(track_pairs)
+
+    host = other = None
+    if len(track_pairs) >= 2:
+        try:
+            d = []
+            for b, _ in track_pairs[:2]:
+                c = b.physicalProperties.centerOfMass
+                d.append((c.x - cut_origin.x) * cut_normal.x +
+                         (c.y - cut_origin.y) * cut_normal.y +
+                         (c.z - cut_origin.z) * cut_normal.z)
+            if d[0] >= d[1]:
+                host, other = track_pairs[0][0], track_pairs[1][0]
+            else:
+                host, other = track_pairs[1][0], track_pairs[0][0]
+        except Exception:
+            host, other = track_pairs[0][0], track_pairs[1][0]
+    else:
+        host = track_pairs[0][0]
+
+    # Reference the MEASURED wall height, not the TRACK_HEIGHT param.  The foot's
+    # embed/protrusion (y_lo/y_hi below) are built off `th`; if the modeled track
+    # is taller than the param, a param-based foot top lands at/under the real
+    # wall tip and the wall pokes through the foot's top face.
+    #   th = wall_tip_z − cut_origin.z (outer floor face).
+    # Prefer the GLOBAL wall_top_z measured once before any foot existed: a
+    # per-host bbox is contaminated by feet already welded in from neighbouring
+    # junctions (its max-Z reads foot-top, not wall-tip), which made later feet
+    # climb and the heights diverge.  Fall back to this host's bbox, then param.
+    rec['th_param'] = round(th, 3)
+    try:
+        if wall_top_z is not None:
+            _th_meas = wall_top_z - cut_origin.z
+            rec['th_src'] = 'global'
+        else:
+            _th_meas = host.boundingBox.maxPoint.z - cut_origin.z
+            rec['th_src'] = 'host_bbox'
+        rec['th_measured'] = round(_th_meas, 3)
+        if 0.5 <= _th_meas <= 3.0:
+            th = _th_meas
+    except Exception:
+        pass
+
+    NB   = adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+    CUT  = adsk.fusion.FeatureOperations.CutFeatureOperation
+    JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
+    ex   = root.features.extrudeFeatures
+
+    # Uniquely rename BOTH adjacent pieces so a foot can be re-fetched + welded
+    # into whichever it overlaps (all pieces share 'Track_Piece' here, and each
+    # NewBody foot extrude stales the pointers).  Welding to EITHER piece (not
+    # just the pre-guessed host) makes a wrong host/direction guess harmless — a
+    # foot can never end up standalone as long as it overlaps some track body.
+    host_tag   = f'WBHost_{joint_num}'
+    other_tag  = f'WBOther_{joint_num}'
+    orig_host  = host.name
+    host.name  = host_tag
+    orig_other = None
+    if other is not None:
+        orig_other = other.name
+        other.name = other_tag
+
+    # ── Consistent WORLD cross-section frame (see wallsnap / MEMORY.md) ───────
+    # world(xp, yp) = cut_origin + Rt*xp + _iyw*yp ; xp = across width (0 =
+    # centreline), yp = floor(0)->wall(th).  Map corners into each sketch's own
+    # inverse so a per-junction local frame flip can't rotate the geometry.
+    Rt = adsk.core.Vector3D.create(cut_normal.y, -cut_normal.x, 0.0)
+    if Rt.length < 1e-9:
+        Rt = adsk.core.Vector3D.create(1.0, 0.0, 0.0)
+    Rt.normalize()
+
+    def _wpt(xp, yp):
+        return adsk.core.Point3D.create(
+            cut_origin.x + Rt.x * xp + _iyw.x * yp,
+            cut_origin.y + Rt.y * xp + _iyw.y * yp,
+            cut_origin.z + Rt.z * xp + _iyw.z * yp)
+
+    # ── Path-following setup ─────────────────────────────────────────────────
+    # The straight prism drifts off the curved wall (chords across the arc), so
+    # follow the path: loft the foot cross-section through several stations that
+    # ride the true path (setByDistanceOnPath), exactly like the wallsnap loft.
+    # r_i = the path ratio of THIS junction; host_sign = the ratio direction
+    # toward the host piece.
+    _use_path = False
+    r_i = host_sign = None
+    Lp  = path_len
+
+    def _frame_at(ratio):
+        """(origin, right_x, right_y) of a plane ⟂ the path at absolute `ratio`."""
+        r = max(0.0, min(1.0, ratio))
+        cin = root.constructionPlanes.createInput()
+        cin.setByDistanceOnPath(path, adsk.core.ValueInput.createByReal(r))
+        pl = root.constructionPlanes.add(cin); pl.isLightBulbOn = False
+        O = pl.geometry.origin.copy(); N = pl.geometry.normal.copy()
+        try: pl.deleteMe()
+        except Exception: pass
+        rtx, rty = N.y, -N.x
+        rl = (rtx * rtx + rty * rty) ** 0.5 or 1.0
+        return O, rtx / rl, rty / rl
+
+    def _path_frame(dist):
+        """Frame at along-path `dist` from the junction toward the host."""
+        return _frame_at(r_i + host_sign * dist / Lp)
+
+    if path is not None and num_pieces and Lp and Lp > 0:
+        try:
+            # r_i is TOPOLOGICAL, not spatial: junction j was placed at ratio
+            # j/num_pieces in Phase 1 (setByDistanceOnPath), and Phase 2 rebuilds
+            # the Path the same way (same sketch curves), so this is exact — no
+            # search needed.  A spatial "nearest path point to cut_origin" search
+            # is WRONG on a loop that passes near itself (hairpins / parallel
+            # straights): it locks onto the wrong section, placing the foot off in
+            # space so it never overlaps the wall (the floating, unwelded feet) —
+            # AND it created ~140 construction planes per junction (the slowness).
+            r_i = float(joint_num) / float(num_pieces)
+            # ALWAYS place the studs in the +ratio direction.  This is
+            # topological, not geometric: junction j sits at ratio j/num_pieces,
+            # so the piece spanning (r_i, r_i + 1/num_pieces) is by construction
+            # the one you enter by moving +ratio.  Two consequences:
+            #   • every junction mounts its DOWNSTREAM piece, so on a closed loop
+            #     each piece is downstream of exactly one junction and therefore
+            #     gets exactly one pair of studs;
+            #   • no sampling, so it cannot degenerate.
+            # The previous version compared the host's CENTRE OF MASS against
+            # path points at ±dr.  On a hairpin the piece is folded back on
+            # itself, so its CoM sits nearer the WRONG sample and the sign
+            # flipped — at joint 6 (the loop's right-tip hairpin) that put both
+            # studs in the neighbouring piece: it ended up with 4 studs while
+            # its neighbour got none and hung on its snap joints alone.  Same
+            # degeneracy the wallsnap code already avoids for male/female
+            # assignment.  (weld-to-either still covers a wrong host GUESS; what
+            # it cannot fix is placing the studs on the wrong piece entirely.)
+            host_sign = 1.0
+            # Sanity only (not a gate): how close r_i lands to the junction.
+            try:
+                O0, _, _ = _frame_at(r_i)
+                rec['origin_err'] = round(
+                    ((O0.x-cut_origin.x)**2 + (O0.y-cut_origin.y)**2 +
+                     (O0.z-cut_origin.z)**2) ** 0.5, 4)
+            except Exception:
+                pass
+            _use_path = True                 # always loft when a path exists
+        except Exception as _ep:
+            rec['path_err'] = str(_ep); _use_path = False
+    rec['method'] = 'loft' if _use_path else 'straight'
+
+    feet_ok = 0
+    nonlocal_welds = [0]      # feet whose tool body was consumed by the JOIN
+
+    def _foot_corners(mag_lo, mag_hi, yl, yh):
+        """Dovetail stud cross-section as (mag, y) pairs — 5 points:
+
+              (mag_lo, yh) ────────────── (mag_hi, yh)   flat top: bears on the
+                   │                        ╱             plaque, the standoff
+                   │                      ╱  45° flare    datum
+                   │        (outer_hw, yh-FLARE)
+                   │                │                     neck: the plaque rail
+              (mag_lo, yl) ── (outer_hw, yl)              slides in below here
+
+        The flare points OUTBOARD only — inboard is the LED aperture.  It is
+        exactly 45° (rise = run) so it self-supports printed floor-on-bed, and
+        the two studs at a junction flare in OPPOSITE directions, so a plaque
+        hooking both captures the pair against pull-off.
+        `yl` sits FOOT_EMBED below the wall tip: that overlap is the weld."""
+        return [(mag_lo, yl), (outer_hw, yl), (outer_hw, yh - FLARE),
+                (mag_hi, yh), (mag_lo, yh)]
+
+    # ══ Master-copy strategy.  Build ONE dovetail stud, then COPY and TRANSFORM
+    #    it into place at each wall tip and merge.  A rigid copy oriented by the
+    #    LOCAL wall tangent at its own centre drifts only by the sagitta of the
+    #    arc it spans — 0.18 mm at R=10 cm, 0.36 mm at R=5 cm over 12 mm — versus
+    #    metres of chord error if it were built off the junction tangent.  The
+    #    3 mm embed swallows that drift; the old 1 mm one did not.
+    #    KEEP THE STUD STRAIGHT: the plaque that hooks it is a rigid straight
+    #    part, so a curve-following stud could not slide into its rails. ═══════
+    mag_lo      = inner_hw + IN_MARGIN          # 0.5 mm clear of the aperture
+    mag_hi      = outer_hw + FLARE              # dovetail tip, outboard only
+    y_lo        = th - FOOT_EMBED               # 3 mm into the wall crest
+    y_hi        = th + NECK_H + FLARE           # flat top = standoff datum
+    center_dist = CONN_CLEAR + FOOT_LEN * 0.5
+    master_name = f'WBFootMaster_{joint_num}'
+
+    def _build_master():
+        """One dovetail stud in the CANONICAL frame: X = length (centred
+        ±FOOT_LEN/2), Y = outboard (width), Z = toward wall.  5-point section on
+        the YZ plane extruded along X.  No bores — the mount hooks the stud."""
+        sk = root.sketches.add(root.yZConstructionPlane)
+        sk.name = f'WBMasterProf_{joint_num}'; sk.isLightBulbOn = False
+        inv = sk.transform.copy(); inv.invert()
+        pts = []
+        for v, w in _foot_corners(mag_lo, mag_hi, y_lo, y_hi):
+            p = adsk.core.Point3D.create(0.0, v, w); p.transformBy(inv)
+            pts.append(adsk.core.Point3D.create(p.x, p.y, 0))
+        Lm = sk.sketchCurves.sketchLines
+        for i in range(len(pts)):
+            Lm.addByTwoPoints(pts[i], pts[(i + 1) % len(pts)])
+        prof, ba = None, 1e18
+        for i in range(sk.profiles.count):
+            pp = sk.profiles.item(i); bb = pp.boundingBox
+            a = ((bb.maxPoint.x-bb.minPoint.x) * (bb.maxPoint.y-bb.minPoint.y))
+            if a < ba:
+                ba, prof = a, pp
+        if prof is None:
+            return None
+        ei = ex.createInput(prof, NB)
+        ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(FOOT_LEN), True)
+        ff = ex.add(ei)
+        if ff.bodies.count == 0:
+            return None
+        ff.bodies.item(0).name = master_name
+        try:
+            rec['master_vol'] = round(
+                _by_name(master_name).physicalProperties.volume, 4)
+        except Exception:
+            pass
+        return _by_name(master_name)
+
+    def _place_foot(side, tag):
+        nonlocal feet_ok
+        # Position + LOCAL tangent at the foot centre (curve-following without a loft).
+        O = T = None
+        if _use_path:
+            try:
+                ratio = max(0.0, min(1.0, r_i + host_sign * center_dist / Lp))
+                cin = root.constructionPlanes.createInput()
+                cin.setByDistanceOnPath(path, adsk.core.ValueInput.createByReal(ratio))
+                pl = root.constructionPlanes.add(cin); pl.isLightBulbOn = False
+                O = pl.geometry.origin.copy(); N = pl.geometry.normal.copy()
+                try: pl.deleteMe()
+                except Exception: pass
+                T = adsk.core.Vector3D.create(N.x, N.y, 0.0)
+            except Exception:
+                O = T = None
+        if O is None or T is None or T.length < 1e-9:
+            O = adsk.core.Point3D.create(
+                cut_origin.x + cut_normal.x * center_dist,
+                cut_origin.y + cut_normal.y * center_dist, cut_origin.z)
+            T = adsk.core.Vector3D.create(cut_normal.x, cut_normal.y, 0.0)
+        T.normalize()
+        # The path sketch drives only the in-plane (XY) curve-following; its
+        # origin sits on the Phase-2 centreline plane (z≈0), NOT the floor face.
+        # The master's height (y_lo/y_hi) is built off the floor face cut_origin.z
+        # (via the measured th = host_ztop − cut_origin.z), so the vertical BASE
+        # must be cut_origin.z — otherwise the foot drops by the plane offset and
+        # its top lands at the wall tip instead of NECK_H+FLARE above it.
+        O = adsk.core.Point3D.create(O.x, O.y, cut_origin.z)
+        # Canonical→world frame: v = side·path-right(T); w = _iyw; u ⟂ (right-handed).
+        v = adsk.core.Vector3D.create(side * T.y, side * (-T.x), 0.0); v.normalize()
+        w = adsk.core.Vector3D.create(_iyw.x, _iyw.y, _iyw.z); w.normalize()
+        u = adsk.core.Vector3D.create(T.x, T.y, T.z)
+        cxp = u.y*v.z - u.z*v.y; cyp = u.z*v.x - u.x*v.z; czp = u.x*v.y - u.y*v.x
+        if cxp*w.x + cyp*w.y + czp*w.z < 0.0:
+            u.scaleBy(-1.0)
+        mtx = adsk.core.Matrix3D.create()
+        mtx.setWithCoordinateSystem(O, u, v, w)
+
+        master = _by_name(master_name)
+        if master is None:
+            return False
+        foot = master.copyToComponent(root)
+        foot_body_name = f'WBFootBody_{joint_num}_{tag}'
+        foot.name = foot_body_name
+        col = adsk.core.ObjectCollection.create(); col.add(_by_name(foot_body_name))
+        mf = root.features.moveFeatures
+        mi = mf.createInput2(col); mi.defineAsFreeMove(mtx)
+        mf.add(mi)
+        # Diagnostic: where did the foot actually land in Z vs the wall tip?
+        # (stud top should be NECK_H+FLARE above the wall rim; if it's at/below it
+        # the wall pokes through the foot's top face.)
+        try:
+            _fbb = _by_name(foot_body_name).boundingBox
+            rec.setdefault('foot_z', []).append(
+                [round(_fbb.minPoint.z, 3), round(_fbb.maxPoint.z, 3)])
+        except Exception:
+            pass
+        feet_ok += 1
+
+        # Weld into whichever adjacent piece it overlaps (host then other).
+        # A JOIN between bodies that DON'T touch still consumes the tool and
+        # leaves the foot as a disjoint lump, so "the tool vanished" proves
+        # nothing.  Measure the target's volume across the combine instead: a
+        # real weld ADDS LESS than the foot's own volume (the embedded part is
+        # already inside the wall); a disjoint lump adds exactly the foot.
+        _fvol = None
+        try:
+            _fvol = _by_name(foot_body_name).physicalProperties.volume
+        except Exception:
+            pass
+        def _recover_stray(tags):
+            """A JOIN between bodies that never touch consumes the tool and re-emits
+            it as a NEW body named '<target> (n)' (Fusion behaviour — this is how
+            joint 6's feet became WBHost_6 (1)/(2) and then bogus Piece_N).  Find
+            that body and give it the foot's name back so the next tag can be tried."""
+            if not _fvol:
+                return None
+            for b in _all_bodies(root):
+                for _tg in tags:
+                    if not b.name.startswith(_tg + ' ('):
+                        continue
+                    try:
+                        if abs(b.physicalProperties.volume - _fvol) < _fvol * 0.10:
+                            b.name = foot_body_name
+                            return b
+                    except Exception:
+                        pass
+            return None
+
+        _welded_into = None
+        _tried = []
+        for _tag_try in (host_tag, other_tag):
+            f = _by_name(foot_body_name)
+            if f is None and _tried:
+                # Previous attempt consumed the foot without absorbing it.
+                f = _recover_stray(_tried)
+            _tried.append(_tag_try)
+            t = _by_name(_tag_try)
+            if t is None or f is None:
+                continue
+            try:
+                _tv0 = t.physicalProperties.volume
+            except Exception:
+                _tv0 = None
+            try:
+                c = adsk.core.ObjectCollection.create(); c.add(f)
+                ci = root.features.combineFeatures.createInput(t, c)
+                ci.operation = JOIN
+                ci.isNewComponent = False
+                ci.isKeepToolBodies = False
+                root.features.combineFeatures.add(ci)
+            except Exception:
+                continue
+            try:
+                _tv1 = _by_name(_tag_try).physicalProperties.volume
+                if _tv0 is not None and _fvol:
+                    _dv = _tv1 - _tv0
+                    rec.setdefault('weld_dv', []).append(
+                        [tag, _tag_try, round(_dv, 4), round(_fvol, 4)])
+                    # Three outcomes, all of which used to report success:
+                    #   dv ≈ 0          → target untouched, foot re-emitted as
+                    #                     '<target> (n)' → try the other piece
+                    #   dv ≈ foot vol   → absorbed but not overlapping (lump)
+                    #   0 < dv < 0.95·f → real weld (the embedded part is already
+                    #                     inside the wall, so it adds less)
+                    if _dv > 1e-4 and _dv < _fvol * 0.95:
+                        _welded_into = _tag_try
+                        break
+            except Exception:
+                pass
+        if _welded_into is not None:
+            nonlocal_welds[0] += 1
+            rec.setdefault('welded_into', []).append([tag, _welded_into])
+        else:
+            # Consumed but never touching (disjoint lump), or never consumed.
+            # If it survives as a '<tag> (n)' stray, give it the foot name back so
+            # leftover_bodies reports it honestly instead of it drifting into
+            # STEP 3 as a bogus piece.
+            if _by_name(foot_body_name) is None:
+                _recover_stray([host_tag, other_tag])
+            rec.setdefault('unwelded', []).append(tag)
+
+        # Wall-screw XY (world) for the drilling template.  The screw is no
+        # longer in the track — it is the plaque's single central M3, which
+        # sits ON the track centreline midway between the two studs.  Both
+        # sides resolve the same O, so record it once (on the R pass).
+        if tag == 'R':
+            rec['screws'].append([round(O.x, 4), round(O.y, 4)])
+        return True
+
+    if _build_master() is not None:
+        for side, tag in ((1.0, 'R'), (-1.0, 'L')):
+            try:
+                _place_foot(side, tag)
+            except Exception as _ef:
+                rec.setdefault('foot_err', str(_ef))
+        _m = _by_name(master_name)
+        if _m is not None:
+            try: _m.deleteMe()
+            except Exception: pass
+        # The master's bore/counterbore sketches live at the world ORIGIN (the
+        # master is built there before being copied+moved onto each wall).  Once
+        # the bore is baked into the moved feet these are just clutter that reads
+        # as "bores stuck at the origin" — remove them.  Keep WBMasterProf_{j};
+        # it's the re-run guard.
+        for _snm in (f'WBMBore_{joint_num}', f'WBMCbore_{joint_num}'):
+            try:
+                _sk = root.sketches.itemByName(_snm)
+                if _sk is not None:
+                    _sk.deleteMe()
+            except Exception:
+                pass
+    else:
+        rec.setdefault('foot_err', 'master build failed')
+
+    rec['feet_ok']  = feet_ok
+    rec['welds_ok'] = nonlocal_welds[0]
+
+    # Diagnostic: wall-tip Z of the host piece (foot_z[*][1] should sit
+    # ~NECK_H+FLARE
+    # above this), and any foot/master bodies that survived (true standalone
+    # count, independent of the weld bookkeeping above).
+    try:
+        _hb = _by_name(host_tag)
+        if _hb is not None:
+            rec['host_ztop'] = round(_hb.boundingBox.maxPoint.z, 3)
+    except Exception:
+        pass
+    try:
+        rec['leftover_bodies'] = [
+            b.name for b in _all_bodies(root)
+            if b.name.startswith(f'WBFootBody_{joint_num}_')
+            or b.name.startswith(f'WBFootMaster_{joint_num}')]
+    except Exception:
+        pass
+
+    # ── Restore both shared piece names so STEP 3 renames them to Piece_N ─────
+    h = _by_name(host_tag)
+    if h is not None:
+        h.name = orig_host
+    if orig_other is not None:
+        o = _by_name(other_tag)
+        if o is not None:
+            o.name = orig_other
+    rec['host_restored'] = h is not None
+
+    try:
+        rec['cut_origin'] = [round(cut_origin.x, 2), round(cut_origin.y, 2),
+                             round(cut_origin.z, 2)]
+        rec['iyw'] = [round(_iyw.x, 2), round(_iyw.y, 2), round(_iyw.z, 2)]
+    except Exception:
+        pass
+
+    rec['success'] = feet_ok > 0
+    return rec
+
+
+# Standoff gap (pillar height) of the wall bracket = the adjustable track-to-wall
+# distance that tunes the LED halo diffusion.  Tune here (cm).
+WALL_STANDOFF_GAP = 1.5      # 15 mm
+
+
+def create_wall_plaque_part(root, params, ui=None):
+    """Standalone printable WALL PLAQUE — the mating half of the dovetail studs.
+
+              ┌───────────────┐  <- pillar, sets the track-to-wall light gap
+              │    pillar     │     (single M3 down the axis, into the wall)
+        ┌─────┴───────────────┴─────┐
+        │           plate           │  <- underside bears on the stud tops
+        └─╲                       ╱─┘     (the standoff datum)
+           ╲ rail             rail ╱      45° hooks, facing INWARD
+            ▔                     ▔
+
+    The two studs at a junction flare OUTBOARD in opposite directions, so a
+    plaque hooking both captures the pair against pull-off.  Engagement is an
+    axial slide along the track tangent — the same motion the wallsnap
+    connector already uses — and the 45° flare doubles as a press-on lead-in
+    for the closing piece of a loop, which has no axial travel.
+
+    Install: clip the plaques onto the studs with the loop ALREADY assembled,
+    offer it up, mark and drill through them.  Each plaque then locates on its
+    own junction, so per-joint error never accumulates around the loop.
+
+    Print it STANDING ON ITS END FACE (track axis vertical).  Plate, rails and
+    pillar are all the same length, making it a constant cross-section prism:
+    nothing overhangs, the plate underside stays flat, and the hooks take
+    pull-off in-plane with the layers.  Laid flat it is bad either way —
+    pillar-down cantilevers the plate over air, plate-down bridges under the
+    datum face.
+
+    Dims marked * MUST match create_wall_bracket's stud or they will not mate.
+    """
+    try:
+        outer_hw = params['TRACK_WIDTH'] / 2.0
+        NECK_H   = 0.25         # * stud neck height above the wall tip
+        FLARE    = 0.20         # * stud dovetail rise = run (45°)
+        PLAQUE_LEN = 1.20       # * = FOOT_LEN, the stud's length
+        FIT      = 0.03         # z-offset of the mating 45° line = 0.21 mm
+                                # perpendicular clearance
+        PLATE_T    = 0.30
+        RAIL_OUT   = outer_hw + FLARE + 0.20    # plaque half-width
+        # Rail inner face clears a CURVED wall, not just the print: a straight
+        # 12 mm rail closes on the inside wall of a bend by the sagitta
+        # (L²/8R = 0.18 mm at R=10 cm, 0.36 at R=5, 0.60 at R=3).  0.6 mm holds
+        # down to about R=3 cm; tighter needs a shorter rail.
+        RAIL_IN    = outer_hw + 0.06
+        RAIL_DEPTH = 0.40
+        PILLAR_HW  = 0.50
+        WALL_HOLE_R = 0.17      # M3 clearance
+        CBORE_R     = 0.32      # head recess, on the TRACK side
+        CBORE_D     = 0.20
+        # Plate underside sits at the stud top, i.e. NECK_H+FLARE above the
+        # wall tip, so the pillar makes up the rest of the light gap.
+        PILLAR_H = WALL_STANDOFF_GAP - (NECK_H + FLARE) - PLATE_T
+        if PILLAR_H < 0.20:
+            if ui:
+                ui.messageBox(
+                    f'WALL_STANDOFF_GAP ({WALL_STANDOFF_GAP*10:.0f} mm) is too '
+                    f'small for the stud ({(NECK_H+FLARE)*10:.1f} mm) plus the '
+                    f'plate ({PLATE_T*10:.0f} mm).\nRaise it above '
+                    f'{((NECK_H+FLARE)+PLATE_T+0.2)*10:.0f} mm.')
+            return False
+
+        NB  = adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+        CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
+        JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
+        ex = root.features.extrudeFeatures
+        NAME = 'WallPlaque'
+
+        for b in list(root.bRepBodies):
+            if b.name.startswith(NAME) or b.name.startswith('WPtmp_'):
+                try: b.deleteMe()
+                except Exception: pass
+        for s in list(root.sketches):
+            if s.name.startswith('WP_'):
+                try: s.deleteMe()
+                except Exception: pass
+
+        def _by(nm):
+            for b in root.bRepBodies:
+                if b.name == nm:
+                    return b
+            return None
+
+        def _xy(pts, z0, z1, name, op=NB, part=None):
+            """Polygon on xY (world x,y) extruded from z0 to z1."""
+            sk = root.sketches.add(root.xYConstructionPlane)
+            sk.name = 'WP_' + name; sk.isLightBulbOn = False
+            inv = sk.transform.copy(); inv.invert()
+            sp = []
+            for x, y in pts:
+                p = adsk.core.Point3D.create(x, y, 0.0); p.transformBy(inv)
+                sp.append(adsk.core.Point3D.create(p.x, p.y, 0.0))
+            lines = sk.sketchCurves.sketchLines
+            for i in range(len(sp)):
+                lines.addByTwoPoints(sp[i], sp[(i + 1) % len(sp)])
+            if sk.profiles.count == 0:
+                raise RuntimeError('no profile: ' + name)
+            ei = ex.createInput(sk.profiles.item(0), op)
+            ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
+                adsk.core.ValueInput.createByReal(z0))
+            ei.setDistanceExtent(
+                False, adsk.core.ValueInput.createByReal(z1 - z0))
+            if part:
+                ei.participantBodies = list(part)
+            return ex.add(ei)
+
+        def _box(x0, x1, y0, y1, z0, z1, name, op=NB, part=None):
+            return _xy([(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+                       z0, z1, name, op, part)
+
+        def _circle(r, z0, z1, name, part):
+            sk = root.sketches.add(root.xYConstructionPlane)
+            sk.name = 'WP_' + name; sk.isLightBulbOn = False
+            inv = sk.transform.copy(); inv.invert()
+            c = adsk.core.Point3D.create(0.0, 0.0, 0.0); c.transformBy(inv)
+            sk.sketchCurves.sketchCircles.addByCenterRadius(
+                adsk.core.Point3D.create(c.x, c.y, 0), r)
+            ei = ex.createInput(sk.profiles.item(0), CUT)
+            ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
+                adsk.core.ValueInput.createByReal(z0))
+            ei.setDistanceExtent(
+                False, adsk.core.ValueInput.createByReal(z1 - z0))
+            ei.participantBodies = list(part)
+            return ex.add(ei)
+
+        def _yz(pts, length, name):
+            """Polygon on yZ (world y,z) extruded SYMMETRICALLY about x=0 —
+            sign-agnostic, so the yZ normal direction never has to be guessed."""
+            sk = root.sketches.add(root.yZConstructionPlane)
+            sk.name = 'WP_' + name; sk.isLightBulbOn = False
+            inv = sk.transform.copy(); inv.invert()
+            sp = []
+            for y, z in pts:
+                p = adsk.core.Point3D.create(0.0, y, z); p.transformBy(inv)
+                sp.append(adsk.core.Point3D.create(p.x, p.y, 0.0))
+            lines = sk.sketchCurves.sketchLines
+            for i in range(len(sp)):
+                lines.addByTwoPoints(sp[i], sp[(i + 1) % len(sp)])
+            if sk.profiles.count == 0:
+                raise RuntimeError('no profile: ' + name)
+            ei = ex.createInput(sk.profiles.item(0), NB)
+            ei.setSymmetricExtent(
+                adsk.core.ValueInput.createByReal(length), True)
+            f = ex.add(ei)
+            if f.bodies.count == 0:
+                raise RuntimeError('no body: ' + name)
+            f.bodies.item(0).name = 'WPtmp_' + name
+            return _by('WPtmp_' + name)
+
+        def _weld(target, tools):
+            for tn in tools:
+                t = _by(target); f = _by(tn)
+                if t is None or f is None:
+                    continue
+                col = adsk.core.ObjectCollection.create(); col.add(f)
+                ci = root.features.combineFeatures.createInput(t, col)
+                ci.operation = JOIN
+                ci.isNewComponent = False
+                ci.isKeepToolBodies = False
+                root.features.combineFeatures.add(ci)
+
+        # Local frame: x along the track, y across, z=0 AT THE PLATE UNDERSIDE
+        # (= the stud top).  The stud's 45° flare runs from (outer_hw, -FLARE)
+        # to (outer_hw+FLARE, 0), i.e. z = y - outer_hw - FLARE; the rail's
+        # mating face is that line dropped by FIT.
+        hl = PLAQUE_LEN / 2.0
+        pf = _box(-hl, hl, -RAIL_OUT, RAIL_OUT, 0.0, PLATE_T, 'Plate')
+        pf.bodies.item(0).name = NAME
+
+        def _flare_z(y):
+            return y - outer_hw - FLARE - FIT
+
+        rail = [(RAIL_OUT, 0.0),
+                (RAIL_OUT, -RAIL_DEPTH),
+                (RAIL_IN,  -RAIL_DEPTH),
+                (RAIL_IN,  _flare_z(RAIL_IN)),
+                (outer_hw + FLARE + FIT, 0.0)]
+        _yz([(y, z) for y, z in rail], PLAQUE_LEN, 'railR')
+        _yz([(-y, z) for y, z in rail], PLAQUE_LEN, 'railL')
+        pil = _box(-hl, hl, -PILLAR_HW, PILLAR_HW,
+                   PLATE_T, PLATE_T + PILLAR_H, 'Pillar')
+        pil.bodies.item(0).name = 'WPtmp_Pillar'
+        _weld(NAME, ['WPtmp_railR', 'WPtmp_railL', 'WPtmp_Pillar'])
+
+        _circle(WALL_HOLE_R, -0.1, PLATE_T + PILLAR_H + 0.1, 'Hole', [_by(NAME)])
+        _circle(CBORE_R, -0.05, CBORE_D, 'Cbore', [_by(NAME)])
+
+        # Park it clear of the track, below everything at min-Y.
+        miny = 1e18; minx = 1e18
+        for b in _all_bodies(root):
+            if b.name == NAME:
+                continue
+            try:
+                bb = b.boundingBox
+                miny = min(miny, bb.minPoint.y); minx = min(minx, bb.minPoint.x)
+            except Exception:
+                pass
+        if miny < 1e17:
+            mtx = adsk.core.Matrix3D.create()
+            mtx.translation = adsk.core.Vector3D.create(
+                minx, miny - 3.0, 0.0)
+            col = adsk.core.ObjectCollection.create(); col.add(_by(NAME))
+            mi = root.features.moveFeatures.createInput2(col)
+            mi.defineAsFreeMove(mtx)
+            root.features.moveFeatures.add(mi)
+
+        if ui:
+            ui.messageBox(
+                'WallPlaque created (body "WallPlaque", parked below the track).\n\n'
+                f'  {RAIL_OUT*20:.0f} mm wide x {PLAQUE_LEN*10:.0f} mm long\n'
+                f'  pillar {PILLAR_H*10:.1f} mm -> {WALL_STANDOFF_GAP*10:.0f} mm '
+                f'from the wall tips to the wall\n'
+                f'  1 x M3 through the centre, head recessed on the track side\n\n'
+                'PRINT IT STANDING ON END (track axis vertical) — constant\n'
+                'cross-section, so no support and a flat bearing datum.\n\n'
+                'Assembly:\n'
+                '  1. Slide the plaque onto a junction\'s two studs along the\n'
+                '     track axis (or press it on — the 45° flare leads it in).\n'
+                '  2. With the loop assembled, mark through the plaque holes,\n'
+                '     drill, and anchor.\n'
+                '  3. Unclip, screw the plaques to the wall, slide the pieces\n'
+                '     back on.\n\n'
+                'Print one per junction — every plaque is identical.'
+            )
+        return True
+    except:
+        if ui:
+            ui.messageBox('Wall plaque part failed:\n' + traceback.format_exc())
+        return False
 
 
 # =============================================================================
