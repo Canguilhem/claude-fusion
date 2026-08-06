@@ -1,89 +1,89 @@
 {
-  "written": "2026-08-04T13:38:48.736448",
+  "written": "2026-08-05T17:55:24.595310",
   "units": "cm (world XY; screw axis = +Z into wall)",
   "screw_positions": [
     [
-      20.6281,
-      -29.7461
+      20.8768,
+      -31.1238
     ],
     [
-      42.0168,
-      -27.37
+      41.2703,
+      -28.5544
     ],
     [
-      58.8528,
-      -41.7689
+      58.6806,
+      -43.1583
     ],
     [
-      57.5313,
-      -26.3374
+      58.905,
+      -26.0673
     ],
     [
-      43.4302,
-      -13.3453
+      44.3403,
+      -14.4091
     ],
     [
-      63.4657,
-      -11.9353
+      62.8477,
+      -13.1915
     ],
     [
-      51.5089,
-      -0.6791
+      52.0089,
+      0.6286
     ],
     [
-      30.2296,
-      -8.6595
+      29.6897,
+      -7.3678
     ],
     [
-      11.8806,
-      -21.4377
+      10.8037,
+      -20.5432
     ]
   ],
   "mount_census": {
     "pieces": [
       {
-        "vol": 33.126,
-        "zmax": 2.15,
+        "vol": 33.781,
+        "zmax": 3.2,
         "studs": true
       },
       {
-        "vol": 33.114,
-        "zmax": 2.15,
+        "vol": 33.772,
+        "zmax": 3.2,
         "studs": true
       },
       {
-        "vol": 33.098,
-        "zmax": 2.15,
+        "vol": 33.77,
+        "zmax": 3.2,
         "studs": true
       },
       {
-        "vol": 33.138,
-        "zmax": 2.15,
+        "vol": 33.774,
+        "zmax": 3.2,
         "studs": true
       },
       {
-        "vol": 33.118,
-        "zmax": 2.15,
+        "vol": 33.771,
+        "zmax": 3.2,
         "studs": true
       },
       {
-        "vol": 33.12,
-        "zmax": 2.15,
+        "vol": 33.732,
+        "zmax": 3.2,
         "studs": true
       },
       {
-        "vol": 33.132,
-        "zmax": 2.15,
+        "vol": 33.776,
+        "zmax": 3.2,
         "studs": true
       },
       {
-        "vol": 65.18,
-        "zmax": 2.15,
+        "vol": 65.842,
+        "zmax": 3.2,
         "studs": true
       },
       {
-        "vol": 33.091,
-        "zmax": 2.15,
+        "vol": 33.815,
+        "zmax": 3.2,
         "studs": true
       }
     ],
@@ -95,8 +95,8 @@
       "success": true,
       "screws": [
         [
-          20.6281,
-          -29.7461
+          20.8768,
+          -31.1238
         ]
       ],
       "track_bodies": 2,
@@ -105,45 +105,34 @@
       "th_measured": 1.7,
       "origin_err": 0.0,
       "method": "loft",
-      "master_vol": 0.249,
+      "master_vol": 1.092,
+      "master_bored": true,
       "foot_z": [
         [
           1.4,
-          2.15
-        ],
-        [
-          1.4,
-          2.15
+          3.2
         ]
       ],
       "weld_dv": [
         [
           "R",
           "WBHost_1",
-          0.1619,
-          0.249
-        ],
-        [
-          "L",
-          "WBHost_1",
-          0.159,
-          0.249
+          1.002,
+          1.092
         ]
       ],
       "welded_into": [
         [
           "R",
           "WBHost_1"
-        ],
-        [
-          "L",
-          "WBHost_1"
         ]
       ],
-      "feet_ok": 2,
-      "welds_ok": 2,
-      "host_ztop": 2.15,
-      "leftover_bodies": [],
+      "feet_ok": 1,
+      "welds_ok": 1,
+      "host_ztop": 3.2,
+      "leftover_bodies": [
+        "WBFootMaster_1"
+      ],
       "host_restored": true,
       "cut_origin": [
         18.56,
@@ -161,8 +150,8 @@
       "success": true,
       "screws": [
         [
-          42.0168,
-          -27.37
+          41.2703,
+          -28.5544
         ]
       ],
       "track_bodies": 2,
@@ -171,45 +160,34 @@
       "th_measured": 1.7,
       "origin_err": 0.0,
       "method": "loft",
-      "master_vol": 0.249,
+      "master_vol": 1.092,
+      "master_bored": true,
       "foot_z": [
         [
           1.4,
-          2.15
-        ],
-        [
-          1.4,
-          2.15
+          3.2
         ]
       ],
       "weld_dv": [
         [
           "R",
           "WBHost_2",
-          0.159,
-          0.249
-        ],
-        [
-          "L",
-          "WBHost_2",
-          0.1612,
-          0.249
+          1.002,
+          1.092
         ]
       ],
       "welded_into": [
         [
           "R",
           "WBHost_2"
-        ],
-        [
-          "L",
-          "WBHost_2"
         ]
       ],
-      "feet_ok": 2,
-      "welds_ok": 2,
-      "host_ztop": 2.15,
-      "leftover_bodies": [],
+      "feet_ok": 1,
+      "welds_ok": 1,
+      "host_ztop": 3.2,
+      "leftover_bodies": [
+        "WBFootMaster_2"
+      ],
       "host_restored": true,
       "cut_origin": [
         40.14,
@@ -227,8 +205,8 @@
       "success": true,
       "screws": [
         [
-          58.8528,
-          -41.7689
+          58.6806,
+          -43.1583
         ]
       ],
       "track_bodies": 2,
@@ -237,45 +215,34 @@
       "th_measured": 1.7,
       "origin_err": 0.0,
       "method": "loft",
-      "master_vol": 0.249,
+      "master_vol": 1.092,
+      "master_bored": true,
       "foot_z": [
         [
           1.4,
-          2.15
-        ],
-        [
-          1.4,
-          2.15
+          3.2
         ]
       ],
       "weld_dv": [
         [
           "R",
           "WBHost_3",
-          0.1616,
-          0.249
-        ],
-        [
-          "L",
-          "WBHost_3",
-          0.159,
-          0.249
+          1.0046,
+          1.092
         ]
       ],
       "welded_into": [
         [
           "R",
           "WBHost_3"
-        ],
-        [
-          "L",
-          "WBHost_3"
         ]
       ],
-      "feet_ok": 2,
-      "welds_ok": 2,
-      "host_ztop": 2.15,
-      "leftover_bodies": [],
+      "feet_ok": 1,
+      "welds_ok": 1,
+      "host_ztop": 3.2,
+      "leftover_bodies": [
+        "WBFootMaster_3"
+      ],
       "host_restored": true,
       "cut_origin": [
         56.8,
@@ -293,8 +260,8 @@
       "success": true,
       "screws": [
         [
-          57.5313,
-          -26.3374
+          58.905,
+          -26.0673
         ]
       ],
       "track_bodies": 2,
@@ -303,45 +270,34 @@
       "th_measured": 1.7,
       "origin_err": 0.0,
       "method": "loft",
-      "master_vol": 0.249,
+      "master_vol": 1.092,
+      "master_bored": true,
       "foot_z": [
         [
           1.4,
-          2.15
-        ],
-        [
-          1.4,
-          2.15
+          3.2
         ]
       ],
       "weld_dv": [
         [
           "R",
           "WBHost_4",
-          0.1627,
-          0.249
-        ],
-        [
-          "L",
-          "WBHost_4",
-          0.1838,
-          0.249
+          1.0057,
+          1.092
         ]
       ],
       "welded_into": [
         [
           "R",
           "WBHost_4"
-        ],
-        [
-          "L",
-          "WBHost_4"
         ]
       ],
-      "feet_ok": 2,
-      "welds_ok": 2,
-      "host_ztop": 2.15,
-      "leftover_bodies": [],
+      "feet_ok": 1,
+      "welds_ok": 1,
+      "host_ztop": 3.2,
+      "leftover_bodies": [
+        "WBFootMaster_4"
+      ],
       "host_restored": true,
       "cut_origin": [
         57.11,
@@ -359,8 +315,8 @@
       "success": true,
       "screws": [
         [
-          43.4302,
-          -13.3453
+          44.3403,
+          -14.4091
         ]
       ],
       "track_bodies": 2,
@@ -369,45 +325,34 @@
       "th_measured": 1.7,
       "origin_err": 0.0,
       "method": "loft",
-      "master_vol": 0.249,
+      "master_vol": 1.092,
+      "master_bored": true,
       "foot_z": [
         [
           1.4,
-          2.15
-        ],
-        [
-          1.4,
-          2.15
+          3.2
         ]
       ],
       "weld_dv": [
         [
           "R",
           "WBHost_5",
-          0.1622,
-          0.249
-        ],
-        [
-          "L",
-          "WBHost_5",
-          0.1649,
-          0.249
+          1.0052,
+          1.092
         ]
       ],
       "welded_into": [
         [
           "R",
           "WBHost_5"
-        ],
-        [
-          "L",
-          "WBHost_5"
         ]
       ],
-      "feet_ok": 2,
-      "welds_ok": 2,
-      "host_ztop": 2.15,
-      "leftover_bodies": [],
+      "feet_ok": 1,
+      "welds_ok": 1,
+      "host_ztop": 3.2,
+      "leftover_bodies": [
+        "WBFootMaster_5"
+      ],
       "host_restored": true,
       "cut_origin": [
         42.62,
@@ -425,8 +370,8 @@
       "success": true,
       "screws": [
         [
-          63.4657,
-          -11.9353
+          62.8477,
+          -13.1915
         ]
       ],
       "track_bodies": 2,
@@ -435,45 +380,34 @@
       "th_measured": 1.7,
       "origin_err": 0.0,
       "method": "loft",
-      "master_vol": 0.249,
+      "master_vol": 1.092,
+      "master_bored": true,
       "foot_z": [
         [
           1.4,
-          2.15
-        ],
-        [
-          1.4,
-          2.15
+          3.2
         ]
       ],
       "weld_dv": [
         [
           "R",
           "WBHost_6",
-          0.1648,
-          0.249
-        ],
-        [
-          "L",
-          "WBHost_6",
-          0.1619,
-          0.249
+          1.0078,
+          1.092
         ]
       ],
       "welded_into": [
         [
           "R",
           "WBHost_6"
-        ],
-        [
-          "L",
-          "WBHost_6"
         ]
       ],
-      "feet_ok": 2,
-      "welds_ok": 2,
-      "host_ztop": 2.15,
-      "leftover_bodies": [],
+      "feet_ok": 1,
+      "welds_ok": 1,
+      "host_ztop": 3.2,
+      "leftover_bodies": [
+        "WBFootMaster_6"
+      ],
       "host_restored": true,
       "cut_origin": [
         61.86,
@@ -491,8 +425,8 @@
       "success": true,
       "screws": [
         [
-          51.5089,
-          -0.6791
+          52.0089,
+          0.6286
         ]
       ],
       "track_bodies": 2,
@@ -501,45 +435,34 @@
       "th_measured": 1.7,
       "origin_err": 0.0,
       "method": "loft",
-      "master_vol": 0.249,
+      "master_vol": 1.092,
+      "master_bored": true,
       "foot_z": [
         [
           1.4,
-          2.15
-        ],
-        [
-          1.4,
-          2.15
+          3.2
         ]
       ],
       "weld_dv": [
         [
           "R",
           "WBHost_7",
-          0.1692,
-          0.249
-        ],
-        [
-          "L",
-          "WBHost_7",
-          0.1746,
-          0.249
+          1.0122,
+          1.092
         ]
       ],
       "welded_into": [
         [
           "R",
           "WBHost_7"
-        ],
-        [
-          "L",
-          "WBHost_7"
         ]
       ],
-      "feet_ok": 2,
-      "welds_ok": 2,
-      "host_ztop": 2.15,
-      "leftover_bodies": [],
+      "feet_ok": 1,
+      "welds_ok": 1,
+      "host_ztop": 3.2,
+      "leftover_bodies": [
+        "WBFootMaster_7"
+      ],
       "host_restored": true,
       "cut_origin": [
         53.08,
@@ -557,8 +480,8 @@
       "success": true,
       "screws": [
         [
-          30.2296,
-          -8.6595
+          29.6897,
+          -7.3678
         ]
       ],
       "track_bodies": 2,
@@ -567,45 +490,31 @@
       "th_measured": 1.7,
       "origin_err": 0.0,
       "method": "loft",
-      "master_vol": 0.249,
+      "master_vol": 1.092,
+      "master_bored": true,
       "foot_z": [
         [
           1.4,
-          2.15
-        ],
-        [
-          1.4,
-          2.15
+          3.2
         ]
       ],
       "weld_dv": [
         [
           "R",
           "WBHost_8",
-          0.1493,
-          0.249
-        ],
-        [
-          "L",
-          "WBHost_8",
-          0.159,
-          0.249
+          1.0437,
+          1.092
         ]
       ],
-      "welded_into": [
-        [
-          "R",
-          "WBHost_8"
-        ],
-        [
-          "L",
-          "WBHost_8"
-        ]
+      "unwelded": [
+        "R"
       ],
-      "feet_ok": 2,
-      "welds_ok": 2,
-      "host_ztop": 2.15,
-      "leftover_bodies": [],
+      "feet_ok": 1,
+      "welds_ok": 0,
+      "host_ztop": 3.2,
+      "leftover_bodies": [
+        "WBFootMaster_8"
+      ],
       "host_restored": true,
       "cut_origin": [
         32.17,
@@ -623,8 +532,8 @@
       "success": true,
       "screws": [
         [
-          11.8806,
-          -21.4377
+          10.8037,
+          -20.5432
         ]
       ],
       "track_bodies": 2,
@@ -633,45 +542,34 @@
       "th_measured": 1.7,
       "origin_err": 0.0,
       "method": "loft",
-      "master_vol": 0.249,
+      "master_vol": 1.092,
+      "master_bored": true,
       "foot_z": [
         [
           1.4,
-          2.15
-        ],
-        [
-          1.4,
-          2.15
+          3.2
         ]
       ],
       "weld_dv": [
         [
           "R",
           "WBHost_9",
-          0.1682,
-          0.249
-        ],
-        [
-          "L",
-          "WBHost_9",
-          0.1604,
-          0.249
+          1.0213,
+          1.092
         ]
       ],
       "welded_into": [
         [
           "R",
           "WBHost_9"
-        ],
-        [
-          "L",
-          "WBHost_9"
         ]
       ],
-      "feet_ok": 2,
-      "welds_ok": 2,
-      "host_ztop": 2.15,
-      "leftover_bodies": [],
+      "feet_ok": 1,
+      "welds_ok": 1,
+      "host_ztop": 3.2,
+      "leftover_bodies": [
+        "WBFootMaster_9"
+      ],
       "host_restored": true,
       "cut_origin": [
         13.01,

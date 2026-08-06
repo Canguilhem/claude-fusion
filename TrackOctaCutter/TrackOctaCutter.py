@@ -105,7 +105,7 @@ def run(context):
             result2 = ui.messageBox(
                 'Phase 2, or a wall-mount test part?\n\n'
                 'YES = Phase 2 (cut track at all CutPlane_* planes)\n'
-                'NO = Generate a WALL PLAQUE (the mount that hooks the studs)\n'
+                'NO = Generate the screw COVER CAP (one per junction)\n'
                 'CANCEL = Show help and current parameters',
                 'Track Octa Cutter',
                 adsk.core.MessageBoxButtonTypes.YesNoCancelButtonType
@@ -113,7 +113,7 @@ def run(context):
             if result2 == adsk.core.DialogResults.DialogYes:
                 cut_at_planes(root, ui, design, params)
             elif result2 == adsk.core.DialogResults.DialogNo:
-                create_wall_plaque_part(root, params, ui)
+                create_wall_cap_part(root, params, ui)
             else:
                 show_help(ui, params)
 
@@ -601,10 +601,11 @@ def cut_at_planes(root, ui, design, params):
         'INTO the track piece — they print as part of it.  They sit on the\n'
         'opaque walls (in shadow) and flare only OUTBOARD, so the LED channel\n'
         'stays fully clear (no blocking, no shadow).\n\n'
-        'NO HOLES are cut in the track: a separate WallPlaque hooks both studs\n'
-        'and carries the single M3 into the wall, hidden behind the track.\n'
-        'Generate that plaque from the main menu (Phase 1? NO -> Phase 2? NO)\n'
-        'and print one per junction — they are all identical.\n\n'
+        'Each bracket reaches the wall by itself and carries its own M3 on an\n'
+        'ear OUTBOARD of the track, so you can drive the screw with the loop\n'
+        'already hanging — no separate mount part, and the mounts do NOT have\n'
+        'to engage simultaneously.  Generate the screw cover cap from the main\n'
+        'menu (Phase 1? NO -> Phase 2? NO); print one per junction.\n\n'
         'A 1:1 drilling template sketch is generated for the wall, but the\n'
         'reliable install is: assemble the loop, clip the plaques on, THEN\n'
         'mark and drill through them so no error accumulates.\n'
@@ -681,12 +682,16 @@ def cut_at_planes(root, ui, design, params):
         # A junction mounts its downstream piece, so on a closed loop the map
         # should be 1:1.  When it isn't, one piece ends up with two pairs and
         # another with NONE — and a piece with no mount hangs on its snap joints
-        # alone.  A studded piece reads max-Z = wall tip + NECK_H + FLARE; a bare
+        # alone.  A bracketed piece reaches the WALL plane; a bare
         # one still reads the wall tip.  This is measured, so it catches a
         # mis-placed pair no matter which code path put it there.
         _wb_census = {'pieces': [], 'unmounted': 0}
         try:
-            _stud_top = (_wall_top_z + 0.30) if _wall_top_z is not None else None
+            # A bracketed piece reaches the WALL plane (wall tip + the standoff
+            # gap); a bare one still stops at the wall tip.  Half the gap is a
+            # threshold nothing else can reach.
+            _stud_top = ((_wall_top_z + WALL_STANDOFF_GAP * 0.5)
+                         if _wall_top_z is not None else None)
             for _b in _all_bodies(root):
                 if not _b.name.startswith('Track_'):
                     continue
@@ -737,9 +742,10 @@ def cut_at_planes(root, ui, design, params):
                 f'(2 per junction, {len(_wb_screws)} plaque screws).\n\n'
                 'Each stud is part of a track piece (wall-facing side, in the '
                 'wall\'s shadow — hidden from the viewer, clear of the LED).\n'
-                'Mount: print one WallPlaque per junction, hook it over both '
-                'studs, and drive its single M3 into a wall anchor.  The gap '
-                'is the plaque pillar (WALL_STANDOFF_GAP).\n\n'
+                'Mount: hold the loop up, mark through each bracket ear, '
+                'drill, hang it back and drive the screws, then press in a '
+                'cover cap.  The gap is printed into the bracket '
+                '(WALL_STANDOFF_GAP).\n\n'
                 f'{_tpl_msg}'
             )
 
@@ -1511,6 +1517,18 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None,
                                      # holds, so it never entered.  Shorter barb
                                      # = real clearance, and costs no stiffness
                                      # (the spring is the tongue, not the bump).
+    # ── Floor half-lap ───────────────────────────────────────────────────────
+    # The joint used to be walls-only, so nothing keyed the floor: the pieces
+    # hinge about the seam and lever the barbs out — that is why the first full
+    # circuit popped apart when handled.  This buries a half-lap INSIDE the
+    # floor's own thickness: the male keeps the bottom SNAP_FLOOR_TT, the female
+    # is relieved to match.  Both visible faces stay flush, so the LED still
+    # lies on a flat floor and the outer (viewer) face is unbroken, and nothing
+    # enters the channel — the gap above the strip is the LIGHT PATH, not free
+    # space, so a boss there would shadow the halo at every junction.
+    # The male half is the BOTTOM so it prints flat on the bed; the female's
+    # void then bridges the channel WIDTH, anchored at both walls.
+    SNAP_FLOOR_TT  = 0.12            # 1.2 mm of 3.0 → 1.8 mm of ceiling left
     SNAP_BARB_CLR  = 0.025           # room past the barb tip inside the window
     SNAP_BARB_ZCL  = 0.04            # window clearance above/below the barb
     SNAP_BARB_OVL  = 0.02            # barb overlap back into tongue (combine bond)
@@ -2712,6 +2730,45 @@ def create_pin_connector(root, cut_plane, params, joint_num, ui=None,
                                 f'{_e_ws}\n{traceback.format_exc()}')
                     ws_rec['walls'].append(wrec)
 
+                # ── Floor half-lap (one per junction, spans the channel) ─────
+                # Not per-wall, so it sits outside the wall loop.  Heights come
+                # from the MEASURED floor faces (fy_b / inward_b), the same
+                # source the wall band uses, so the arbitrary per-junction sign
+                # of the sketch frame can't flip it.
+                frec = {'tongue_ok': False, 'pocket_removed': None,
+                        'error': None}
+                try:
+                    _fa = fy_b - inward_b * wt              # outer floor face
+                    _fb = _fa + inward_b * SNAP_FLOOR_TT    # top of the tongue
+                    flo, fhi = (_fa, _fb) if _fa < _fb else (_fb, _fa)
+                    _fst = [0.0, LAP * 0.25, LAP * 0.5, LAP * 0.75, LAP]
+                    # Relieve the female first, then grow the male's tongue.
+                    female_body = _refetch(female_body)
+                    _vf0 = female_body.physicalProperties.volume
+                    fpk = _loft([-CL] + _fst + [LAP + POCKET_CLR],
+                                -(ih + CL), ih + CL, flo - CL, fhi + CL,
+                                1.0, f'SnapFloorPocket_{joint_num}')
+                    if fpk is not None:
+                        _combine(_refetch(female_body), _refetch(fpk), _CUT)
+                        female_body = _refetch(female_body)
+                        frec['pocket_removed'] = round(
+                            _vf0 - female_body.physicalProperties.volume, 5)
+                    # Starts BOSS_OWN inside its own piece so the JOIN has
+                    # overlap to bond to, exactly like the wall tongue.
+                    ftg = _loft([-BOSS_OWN] + _fst, -ih, ih, flo, fhi, 1.0,
+                                f'SnapFloorTongue_{joint_num}')
+                    if ftg is not None:
+                        _combine(_refetch(male_body), _refetch(ftg), _JOIN)
+                        male_body = _refetch(male_body)
+                        frec['tongue_ok'] = True
+                except Exception as _e_fl:
+                    frec['error'] = str(_e_fl)
+                ws_rec['floor'] = frec
+
+            if not _use_sweep:
+                # The straight fallback builds walls only.  Say so rather than
+                # letting a junction quietly come out without a floor key.
+                ws_rec['floor'] = {'skipped': 'straight fallback (no path)'}
             for wsign in (1.0, -1.0) if not _use_sweep else []:
                 wlab = 'R' if wsign > 0 else 'L'
                 wrec = {'wall': wlab, 'pocket_removed': None,
@@ -3171,21 +3228,41 @@ def create_wall_bracket(root, cut_plane, params, joint_num, ui=None,
     outer_hw  = params['TRACK_WIDTH'] / 2.0                 # outer wall face |x|
     inner_hw  = (params['TRACK_WIDTH'] - 2.0 * wt) / 2.0    # inner wall face |x|
 
-    # ── Dovetail stud (replaces the bored foot) — coupon-validated 2026-08-03 ─
-    # The foot used to carry an M3 through-bore + counterbore for a screw.  That
-    # is gone: the mount is now a plaque that HOOKS the stud (see
-    # create_wall_plaque_part), so the track carries no holes at all — no light
-    # leak, no 0.5 mm skins, and the screw moved to the plaque's centreline
-    # where it is hidden behind the track.
-    FOOT_LEN   = 1.20    # 12 mm along the track (was 8) = the plaque's grip
-    FOOT_EMBED = 0.30    # 3 mm INTO the wall crest (was 1).  This is the weld:
-                         # 0.25 × 0.30 × 1.20 = 0.090 cm³ of overlap vs 0.020
-                         # before — and the old 1 mm lap left joint 4 with just
-                         # 0.0011 cm³ once the straight stud chorded off the arc.
-    NECK_H     = 0.25    # 2.5 mm of neck above the wall tip (the rail's throat)
-    FLARE      = 0.20    # 45° dovetail rise = run: printable, self-centring
-    IN_MARGIN  = 0.05    # hold the stud 0.5 mm clear of the channel edge so
+    # ── Integrated single-ear bracket (2026-08-05) ───────────────────────────
+    # Supersedes BOTH the bored foot and the dovetail-stud + separate-plaque
+    # design.  ONE bracket per junction, welded into the piece, reaching all the
+    # way to the wall and carrying its screw on an ear OUTBOARD of the track.
+    # What that removes, versus stud + plaque:
+    #   • every fit tolerance between track and mount (no rails, no dovetail);
+    #   • the simultaneous-engagement problem — the mount IS the piece;
+    #   • the R≈3 cm curve limit imposed by a straight rail on a curved wall;
+    #   • 18 separate printed parts;
+    #   • the plaque plate that spanned the channel and shadowed the halo at
+    #     every junction — a bracket on one wall tip never crosses the channel.
+    # The cost is that the standoff gap is now PRINTED GEOMETRY: changing the
+    # LED gap means reprinting pieces, not small parts.
+    FOOT_LEN   = 1.20    # 12 mm along the track
+    FOOT_EMBED = 0.30    # 3 mm INTO the wall crest — this overlap IS the weld:
+                         # 0.25 × 0.30 × 1.20 = 0.090 cm³, vs 0.020 for the old
+                         # 1 mm lap, which left joint 4 with just 0.0011 cm³
+                         # once the straight foot chorded off the arc.
+    EAR_T      = 0.40    # ear plate: 2 mm of counterbore + 2 mm above it
+    RIB_T      = 0.25    # gusset rib thickness — TWO ribs, at the ENDS of the
+                         # length, NOT a solid 45° wedge across it.  A wedge
+                         # would put the screw's counterbore mouth on a sloped
+                         # face, which is exactly what made the original foot's
+                         # screw seat unusable.  Ribs leave the middle of the
+                         # ear's underside flat and horizontal for the head and
+                         # the cap, and the gap between them bridges.
+    IN_MARGIN  = 0.05    # hold the bracket 0.5 mm clear of the channel edge so
                          # curve drift can never push it over the LED aperture
+    EAR_SIDE   = 1.0     # +1 = path-right.  Keep it CONSTANT: the path is
+                         # consistently oriented, so one local side means all
+                         # ears land on the same side of the loop, which reads
+                         # deliberate.  Flip to -1.0 to put them all inboard.
+    BORE_R     = 0.17    # M3 clearance through the ear
+    CBORE_R    = 0.32    # head recess, on the VIEWER side; the cap plugs it
+    CBORE_D    = 0.20
     CONN_CLEAR = 1.50    # 15 mm past the seam (SNAP_LAP_LEN 1.20 + the 0.5 mm
                          # pocket relief + margin) so the feet clear the
                          # wallsnap zone.  Raised from 1.00 when the lap grew
@@ -3393,22 +3470,31 @@ def create_wall_bracket(root, cut_plane, params, joint_num, ui=None,
     nonlocal_welds = [0]      # feet whose tool body was consumed by the JOIN
 
     def _foot_corners(mag_lo, mag_hi, yl, yh):
-        """Dovetail stud cross-section as (mag, y) pairs — 5 points:
+        """Bracket cross-section as (mag, y) pairs — post + ear, 6 points:
 
-              (mag_lo, yh) ────────────── (mag_hi, yh)   flat top: bears on the
-                   │                        ╱             plaque, the standoff
-                   │                      ╱  45° flare    datum
-                   │        (outer_hw, yh-FLARE)
-                   │                │                     neck: the plaque rail
-              (mag_lo, yl) ── (outer_hw, yl)              slides in below here
+           (mag_lo, yh) ─────────────────── (mag_hi, yh)   wall face; the screw
+                │                                │          goes through here
+                │      (outer_hw, yh-EAR_T) ─── (mag_hi, yh-EAR_T)
+                │                │                          ↑ flat underside =
+                │   post         │                            screw seat + cap
+           (mag_lo, yl) ── (outer_hw, yl)                   3 mm into the crest
 
-        The flare points OUTBOARD only — inboard is the LED aperture.  It is
-        exactly 45° (rise = run) so it self-supports printed floor-on-bed, and
-        the two studs at a junction flare in OPPOSITE directions, so a plaque
-        hooking both captures the pair against pull-off.
+        The ear reaches OUTBOARD only — inboard is the LED aperture.  Its
+        underside is deliberately flat and horizontal: the head bears there and
+        the cap plugs it, so it must not be sloped.  The 9 mm overhang is
+        carried by two 45° ribs at the ENDS of the length (see `_rib_corners`),
+        leaving the middle open to bridge.
         `yl` sits FOOT_EMBED below the wall tip: that overlap is the weld."""
-        return [(mag_lo, yl), (outer_hw, yl), (outer_hw, yh - FLARE),
-                (mag_hi, yh), (mag_lo, yh)]
+        return [(mag_lo, yl), (outer_hw, yl), (outer_hw, yh - EAR_T),
+                (mag_hi, yh - EAR_T), (mag_hi, yh), (mag_lo, yh)]
+
+    def _rib_corners(yh):
+        """45° gusset rib under the ear: rise = run, so it self-supports when
+        printed floor-on-bed.  Right triangle from the post's outer face up to
+        the ear's outboard edge."""
+        _run = ear_out - outer_hw
+        return [(outer_hw, yh - EAR_T - _run), (ear_out, yh - EAR_T),
+                (outer_hw, yh - EAR_T)]
 
     # ══ Master-copy strategy.  Build ONE dovetail stud, then COPY and TRANSFORM
     #    it into place at each wall tip and merge.  A rigid copy oriented by the
@@ -3418,22 +3504,26 @@ def create_wall_bracket(root, cut_plane, params, joint_num, ui=None,
     #    3 mm embed swallows that drift; the old 1 mm one did not.
     #    KEEP THE STUD STRAIGHT: the plaque that hooks it is a rigid straight
     #    part, so a curve-following stud could not slide into its rails. ═══════
+    # Screw sits WALL_EAR_Y outboard of the centreline — far enough that
+    # its head clears the track edge, so it can be driven with the loop already
+    # hanging.  Same constant the drill template marks with.
+    ear_out     = WALL_EAR_Y + CBORE_R + 0.18   # 1.90 ear edge
     mag_lo      = inner_hw + IN_MARGIN          # 0.5 mm clear of the aperture
-    mag_hi      = outer_hw + FLARE              # dovetail tip, outboard only
+    mag_hi      = ear_out
     y_lo        = th - FOOT_EMBED               # 3 mm into the wall crest
-    y_hi        = th + NECK_H + FLARE           # flat top = standoff datum
+    y_hi        = th + WALL_STANDOFF_GAP        # ear face lies ON the wall
     center_dist = CONN_CLEAR + FOOT_LEN * 0.5
     master_name = f'WBFootMaster_{joint_num}'
 
-    def _build_master():
-        """One dovetail stud in the CANONICAL frame: X = length (centred
-        ±FOOT_LEN/2), Y = outboard (width), Z = toward wall.  5-point section on
-        the YZ plane extruded along X.  No bores — the mount hooks the stud."""
+    def _yz_prism(corners, length, name):
+        """Extrude a (mag, y) polygon along X, SYMMETRICALLY about x=0 — that
+        way the yZ plane's normal direction never has to be guessed.  Returns
+        the new body."""
         sk = root.sketches.add(root.yZConstructionPlane)
-        sk.name = f'WBMasterProf_{joint_num}'; sk.isLightBulbOn = False
+        sk.name = name; sk.isLightBulbOn = False
         inv = sk.transform.copy(); inv.invert()
         pts = []
-        for v, w in _foot_corners(mag_lo, mag_hi, y_lo, y_hi):
+        for v, w in corners:
             p = adsk.core.Point3D.create(0.0, v, w); p.transformBy(inv)
             pts.append(adsk.core.Point3D.create(p.x, p.y, 0))
         Lm = sk.sketchCurves.sketchLines
@@ -3448,14 +3538,86 @@ def create_wall_bracket(root, cut_plane, params, joint_num, ui=None,
         if prof is None:
             return None
         ei = ex.createInput(prof, NB)
-        ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(FOOT_LEN), True)
+        ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(length), True)
         ff = ex.add(ei)
-        if ff.bodies.count == 0:
+        return ff.bodies.item(0) if ff.bodies.count else None
+
+    def _shift(body, dx):
+        mtx = adsk.core.Matrix3D.create()
+        mtx.translation = adsk.core.Vector3D.create(dx, 0.0, 0.0)
+        col = adsk.core.ObjectCollection.create(); col.add(body)
+        mi = root.features.moveFeatures.createInput2(col)
+        mi.defineAsFreeMove(mtx)
+        root.features.moveFeatures.add(mi)
+
+    def _build_master():
+        """One bracket in the CANONICAL frame: X = length (centred ±FOOT_LEN/2),
+        Y = outboard, Z = toward wall.  Post + ear extruded the full length,
+        then a 45° gusset rib added at EACH END so the middle of the ear's
+        underside stays flat for the screw head and the cap.  Finally the M3
+        bore + counterbore, both along +Z at Y = the ear offset."""
+        body = _yz_prism(_foot_corners(mag_lo, mag_hi, y_lo, y_hi), FOOT_LEN,
+                         f'WBMasterProf_{joint_num}')
+        if body is None:
             return None
-        ff.bodies.item(0).name = master_name
+        body.name = master_name
+        # Ribs: built symmetric about x=0, then shifted out to the ends.
+        _off = (FOOT_LEN - RIB_T) * 0.5
+        for _k, _dx in ((0, -_off), (1, _off)):
+            rb = _yz_prism(_rib_corners(y_hi), RIB_T,
+                           f'WBMasterRib_{joint_num}_{_k}')
+            if rb is None:
+                continue
+            rb.name = f'WBtmpRib_{joint_num}_{_k}'
+            _shift(_by_name(f'WBtmpRib_{joint_num}_{_k}'), _dx)
+            t = _by_name(master_name); f = _by_name(f'WBtmpRib_{joint_num}_{_k}')
+            if t is not None and f is not None:
+                c = adsk.core.ObjectCollection.create(); c.add(f)
+                ci = root.features.combineFeatures.createInput(t, c)
+                ci.operation = JOIN
+                ci.isNewComponent = False
+                ci.isKeepToolBodies = False
+                root.features.combineFeatures.add(ci)
+
+        def _mcirc(nm, r):
+            s = root.sketches.add(root.xYConstructionPlane)
+            s.name = nm; s.isLightBulbOn = False
+            iv = s.transform.copy(); iv.invert()
+            c = adsk.core.Point3D.create(0.0, WALL_EAR_Y, 0.0)
+            c.transformBy(iv)
+            s.sketchCurves.sketchCircles.addByCenterRadius(
+                adsk.core.Point3D.create(c.x, c.y, 0), r)
+            return s.profiles.item(0) if s.profiles.count else None
+
+        def _mcut(prof2, z0, depth):
+            """Cut UP from z0 (the ear's flat underside) toward the wall.  With
+            isSymmetric=False a POSITIVE distance runs along +normal = +Z, i.e.
+            into the ear — the opposite convention to the old downward bores."""
+            ei2 = ex.createInput(prof2, CUT)
+            ei2.startExtent = adsk.fusion.OffsetStartDefinition.create(
+                adsk.core.ValueInput.createByReal(z0))
+            ei2.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth))
+            mm = _by_name(master_name)
+            if mm is not None:
+                ei2.participantBodies = [mm]
+            ex.add(ei2)
+
+        _ear_u = y_hi - EAR_T
         try:
-            rec['master_vol'] = round(
-                _by_name(master_name).physicalProperties.volume, 4)
+            _v0 = _by_name(master_name).physicalProperties.volume
+        except Exception:
+            _v0 = None
+        c1 = _mcirc(f'WBMBore_{joint_num}', BORE_R)
+        if c1 is not None:
+            _mcut(c1, _ear_u - 0.05, EAR_T + 0.10)      # clean through the ear
+        c2 = _mcirc(f'WBMCbore_{joint_num}', CBORE_R)
+        if c2 is not None:
+            _mcut(c2, _ear_u - 0.05, CBORE_D + 0.05)    # head recess + the cap
+        try:
+            _v1 = _by_name(master_name).physicalProperties.volume
+            rec['master_vol'] = round(_v1, 4)
+            if _v0 is not None:
+                rec['master_bored'] = (_v0 - _v1) > 1e-4
         except Exception:
             pass
         return _by_name(master_name)
@@ -3487,7 +3649,7 @@ def create_wall_bracket(root, cut_plane, params, joint_num, ui=None,
         # The master's height (y_lo/y_hi) is built off the floor face cut_origin.z
         # (via the measured th = host_ztop − cut_origin.z), so the vertical BASE
         # must be cut_origin.z — otherwise the foot drops by the plane offset and
-        # its top lands at the wall tip instead of NECK_H+FLARE above it.
+        # its top lands at the wall tip instead of the full standoff gap.
         O = adsk.core.Point3D.create(O.x, O.y, cut_origin.z)
         # Canonical→world frame: v = side·path-right(T); w = _iyw; u ⟂ (right-handed).
         v = adsk.core.Vector3D.create(side * T.y, side * (-T.x), 0.0); v.normalize()
@@ -3510,7 +3672,7 @@ def create_wall_bracket(root, cut_plane, params, joint_num, ui=None,
         mi = mf.createInput2(col); mi.defineAsFreeMove(mtx)
         mf.add(mi)
         # Diagnostic: where did the foot actually land in Z vs the wall tip?
-        # (stud top should be NECK_H+FLARE above the wall rim; if it's at/below it
+        # (bracket top should be WALL_STANDOFF_GAP above the wall rim; if lower
         # the wall pokes through the foot's top face.)
         try:
             _fbb = _by_name(foot_body_name).boundingBox
@@ -3603,16 +3765,21 @@ def create_wall_bracket(root, cut_plane, params, joint_num, ui=None,
                 _recover_stray([host_tag, other_tag])
             rec.setdefault('unwelded', []).append(tag)
 
-        # Wall-screw XY (world) for the drilling template.  The screw is no
-        # longer in the track — it is the plaque's single central M3, which
-        # sits ON the track centreline midway between the two studs.  Both
-        # sides resolve the same O, so record it once (on the R pass).
-        if tag == 'R':
-            rec['screws'].append([round(O.x, 4), round(O.y, 4)])
+        # Wall-screw XY (world) for the drilling template: the bracket's single
+        # M3, WALL_EAR_Y outboard of the centreline.  `v` is this side's
+        # outboard unit vector, so this lands on the real hole — marking the
+        # centreline instead would put every hole 14 mm out.
+        rec['screws'].append(
+            [round(O.x + v.x * WALL_EAR_Y, 4),
+             round(O.y + v.y * WALL_EAR_Y, 4)])
         return True
 
     if _build_master() is not None:
-        for side, tag in ((1.0, 'R'), (-1.0, 'L')):
+        # ONE bracket per junction now, on EAR_SIDE.  It reaches the wall by
+        # itself, so there is nothing for a second one to pair with — and a
+        # single-sided mount leaves the piece a little twist freedom about the
+        # track axis, which the floor lap and ~20 cm mount spacing cover.
+        for side, tag in ((EAR_SIDE, 'R' if EAR_SIDE > 0 else 'L'),):
             try:
                 _place_foot(side, tag)
             except Exception as _ef:
@@ -3640,7 +3807,7 @@ def create_wall_bracket(root, cut_plane, params, joint_num, ui=None,
     rec['welds_ok'] = nonlocal_welds[0]
 
     # Diagnostic: wall-tip Z of the host piece (foot_z[*][1] should sit
-    # ~NECK_H+FLARE
+    # ~WALL_STANDOFF_GAP
     # above this), and any foot/master bodies that survived (true standalone
     # count, independent of the weld bookkeeping above).
     try:
@@ -3682,80 +3849,44 @@ def create_wall_bracket(root, cut_plane, params, joint_num, ui=None,
 # distance that tunes the LED halo diffusion.  Tune here (cm).
 WALL_STANDOFF_GAP = 1.5      # 15 mm
 
+# Offset of the bracket's screw ear from the track centreline.  SHARED: the
+# bracket bores its hole here AND the drill template marks here.  If the two
+# ever disagree, every wall hole is drilled in the wrong place.
+WALL_EAR_Y = 1.40            # 14 mm — head clears the 10 mm track edge
 
-def create_wall_plaque_part(root, params, ui=None):
-    """Standalone printable WALL PLAQUE — the mating half of the dovetail studs.
 
-              ┌───────────────┐  <- pillar, sets the track-to-wall light gap
-              │    pillar     │     (single M3 down the axis, into the wall)
-        ┌─────┴───────────────┴─────┐
-        │           plate           │  <- underside bears on the stud tops
-        └─╲                       ╱─┘     (the standoff datum)
-           ╲ rail             rail ╱      45° hooks, facing INWARD
-            ▔                     ▔
+def create_wall_cap_part(root, params, ui=None):
+    """Standalone printable COVER CAP that plugs a bracket's counterbore, so the
+    screw head disappears once the loop is on the wall.
 
-    The two studs at a junction flare OUTBOARD in opposite directions, so a
-    plaque hooking both captures the pair against pull-off.  Engagement is an
-    axial slide along the track tangent — the same motion the wallsnap
-    connector already uses — and the 45° flare doubles as a press-on lead-in
-    for the closing piece of a loop, which has no axial travel.
+    The bracket itself is printed as part of its track piece (see
+    create_wall_bracket) — it reaches the wall and carries its own M3 on an ear
+    outboard of the track, so there is no separate mount part any more.  This
+    is all that is left to print separately: one cap per junction.
 
-    Install: clip the plaques onto the studs with the loop ALREADY assembled,
-    offer it up, mark and drill through them.  Each plaque then locates on its
-    own junction, so per-joint error never accumulates around the loop.
-
-    Print it STANDING ON ITS END FACE (track axis vertical).  Plate, rails and
-    pillar are all the same length, making it a constant cross-section prism:
-    nothing overhangs, the plate underside stays flat, and the hooks take
-    pull-off in-plane with the layers.  Laid flat it is bad either way —
-    pillar-down cantilevers the plate over air, plate-down bridges under the
-    datum face.
-
-    Dims marked * MUST match create_wall_bracket's stud or they will not mate.
+    Supersedes create_wall_plaque_part (dovetail studs + a hooking plaque),
+    which is gone: the integrated bracket removed every fit tolerance between
+    track and mount, the simultaneous-engagement problem, the R~3 cm curve
+    limit a straight rail imposed, and the plate that spanned the channel and
+    shadowed the halo at every junction.
     """
     try:
-        outer_hw = params['TRACK_WIDTH'] / 2.0
-        NECK_H   = 0.25         # * stud neck height above the wall tip
-        FLARE    = 0.20         # * stud dovetail rise = run (45°)
-        PLAQUE_LEN = 1.20       # * = FOOT_LEN, the stud's length
-        FIT      = 0.03         # z-offset of the mating 45° line = 0.21 mm
-                                # perpendicular clearance
-        PLATE_T    = 0.30
-        RAIL_OUT   = outer_hw + FLARE + 0.20    # plaque half-width
-        # Rail inner face clears a CURVED wall, not just the print: a straight
-        # 12 mm rail closes on the inside wall of a bend by the sagitta
-        # (L²/8R = 0.18 mm at R=10 cm, 0.36 at R=5, 0.60 at R=3).  0.6 mm holds
-        # down to about R=3 cm; tighter needs a shorter rail.
-        RAIL_IN    = outer_hw + 0.06
-        RAIL_DEPTH = 0.40
-        PILLAR_HW  = 0.50
-        WALL_HOLE_R = 0.17      # M3 clearance
-        CBORE_R     = 0.32      # head recess, on the TRACK side
-        CBORE_D     = 0.20
-        # Plate underside sits at the stud top, i.e. NECK_H+FLARE above the
-        # wall tip, so the pillar makes up the rest of the light gap.
-        PILLAR_H = WALL_STANDOFF_GAP - (NECK_H + FLARE) - PLATE_T
-        if PILLAR_H < 0.20:
-            if ui:
-                ui.messageBox(
-                    f'WALL_STANDOFF_GAP ({WALL_STANDOFF_GAP*10:.0f} mm) is too '
-                    f'small for the stud ({(NECK_H+FLARE)*10:.1f} mm) plus the '
-                    f'plate ({PLATE_T*10:.0f} mm).\nRaise it above '
-                    f'{((NECK_H+FLARE)+PLATE_T+0.2)*10:.0f} mm.')
-            return False
+        CBORE_R  = 0.32         # * must match create_wall_bracket's counterbore
+        CBORE_D  = 0.20         # *
+        CAP_R    = CBORE_R - 0.005      # 0.1 mm total — snug in FDM
+        CAP_LEAD = 0.03                 # stepped lead-in on the back edge
+        NAME     = 'WallScrewCap'
 
-        NB  = adsk.fusion.FeatureOperations.NewBodyFeatureOperation
-        CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
+        NB = adsk.fusion.FeatureOperations.NewBodyFeatureOperation
         JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
         ex = root.features.extrudeFeatures
-        NAME = 'WallPlaque'
 
         for b in list(root.bRepBodies):
-            if b.name.startswith(NAME) or b.name.startswith('WPtmp_'):
+            if b.name.startswith(NAME) or b.name.startswith('WCtmp_'):
                 try: b.deleteMe()
                 except Exception: pass
         for s in list(root.sketches):
-            if s.name.startswith('WP_'):
+            if s.name.startswith('WC_'):
                 try: s.deleteMe()
                 except Exception: pass
 
@@ -3765,77 +3896,30 @@ def create_wall_plaque_part(root, params, ui=None):
                     return b
             return None
 
-        def _xy(pts, z0, z1, name, op=NB, part=None):
-            """Polygon on xY (world x,y) extruded from z0 to z1."""
+        def _disc(r, z0, z1, name):
             sk = root.sketches.add(root.xYConstructionPlane)
-            sk.name = 'WP_' + name; sk.isLightBulbOn = False
-            inv = sk.transform.copy(); inv.invert()
-            sp = []
-            for x, y in pts:
-                p = adsk.core.Point3D.create(x, y, 0.0); p.transformBy(inv)
-                sp.append(adsk.core.Point3D.create(p.x, p.y, 0.0))
-            lines = sk.sketchCurves.sketchLines
-            for i in range(len(sp)):
-                lines.addByTwoPoints(sp[i], sp[(i + 1) % len(sp)])
-            if sk.profiles.count == 0:
-                raise RuntimeError('no profile: ' + name)
-            ei = ex.createInput(sk.profiles.item(0), op)
-            ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
-                adsk.core.ValueInput.createByReal(z0))
-            ei.setDistanceExtent(
-                False, adsk.core.ValueInput.createByReal(z1 - z0))
-            if part:
-                ei.participantBodies = list(part)
-            return ex.add(ei)
-
-        def _box(x0, x1, y0, y1, z0, z1, name, op=NB, part=None):
-            return _xy([(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
-                       z0, z1, name, op, part)
-
-        def _circle(r, z0, z1, name, part):
-            sk = root.sketches.add(root.xYConstructionPlane)
-            sk.name = 'WP_' + name; sk.isLightBulbOn = False
+            sk.name = 'WC_' + name; sk.isLightBulbOn = False
             inv = sk.transform.copy(); inv.invert()
             c = adsk.core.Point3D.create(0.0, 0.0, 0.0); c.transformBy(inv)
             sk.sketchCurves.sketchCircles.addByCenterRadius(
                 adsk.core.Point3D.create(c.x, c.y, 0), r)
-            ei = ex.createInput(sk.profiles.item(0), CUT)
+            ei = ex.createInput(sk.profiles.item(0), NB)
             ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
                 adsk.core.ValueInput.createByReal(z0))
             ei.setDistanceExtent(
                 False, adsk.core.ValueInput.createByReal(z1 - z0))
-            ei.participantBodies = list(part)
-            return ex.add(ei)
-
-        def _yz(pts, length, name):
-            """Polygon on yZ (world y,z) extruded SYMMETRICALLY about x=0 —
-            sign-agnostic, so the yZ normal direction never has to be guessed."""
-            sk = root.sketches.add(root.yZConstructionPlane)
-            sk.name = 'WP_' + name; sk.isLightBulbOn = False
-            inv = sk.transform.copy(); inv.invert()
-            sp = []
-            for y, z in pts:
-                p = adsk.core.Point3D.create(0.0, y, z); p.transformBy(inv)
-                sp.append(adsk.core.Point3D.create(p.x, p.y, 0.0))
-            lines = sk.sketchCurves.sketchLines
-            for i in range(len(sp)):
-                lines.addByTwoPoints(sp[i], sp[(i + 1) % len(sp)])
-            if sk.profiles.count == 0:
-                raise RuntimeError('no profile: ' + name)
-            ei = ex.createInput(sk.profiles.item(0), NB)
-            ei.setSymmetricExtent(
-                adsk.core.ValueInput.createByReal(length), True)
             f = ex.add(ei)
-            if f.bodies.count == 0:
-                raise RuntimeError('no body: ' + name)
-            f.bodies.item(0).name = 'WPtmp_' + name
-            return _by('WPtmp_' + name)
+            return f.bodies.item(0) if f.bodies.count else None
 
-        def _weld(target, tools):
-            for tn in tools:
-                t = _by(target); f = _by(tn)
-                if t is None or f is None:
-                    continue
+        body = _disc(CAP_R, 0.0, CBORE_D - CAP_LEAD, 'CapBody')
+        if body is None:
+            return False
+        body.name = NAME
+        lead = _disc(CAP_R - CAP_LEAD, CBORE_D - CAP_LEAD, CBORE_D, 'CapLead')
+        if lead is not None:
+            lead.name = 'WCtmp_lead'
+            t = _by(NAME); f = _by('WCtmp_lead')
+            if t is not None and f is not None:
                 col = adsk.core.ObjectCollection.create(); col.add(f)
                 ci = root.features.combineFeatures.createInput(t, col)
                 ci.operation = JOIN
@@ -3843,46 +3927,19 @@ def create_wall_plaque_part(root, params, ui=None):
                 ci.isKeepToolBodies = False
                 root.features.combineFeatures.add(ci)
 
-        # Local frame: x along the track, y across, z=0 AT THE PLATE UNDERSIDE
-        # (= the stud top).  The stud's 45° flare runs from (outer_hw, -FLARE)
-        # to (outer_hw+FLARE, 0), i.e. z = y - outer_hw - FLARE; the rail's
-        # mating face is that line dropped by FIT.
-        hl = PLAQUE_LEN / 2.0
-        pf = _box(-hl, hl, -RAIL_OUT, RAIL_OUT, 0.0, PLATE_T, 'Plate')
-        pf.bodies.item(0).name = NAME
-
-        def _flare_z(y):
-            return y - outer_hw - FLARE - FIT
-
-        rail = [(RAIL_OUT, 0.0),
-                (RAIL_OUT, -RAIL_DEPTH),
-                (RAIL_IN,  -RAIL_DEPTH),
-                (RAIL_IN,  _flare_z(RAIL_IN)),
-                (outer_hw + FLARE + FIT, 0.0)]
-        _yz([(y, z) for y, z in rail], PLAQUE_LEN, 'railR')
-        _yz([(-y, z) for y, z in rail], PLAQUE_LEN, 'railL')
-        pil = _box(-hl, hl, -PILLAR_HW, PILLAR_HW,
-                   PLATE_T, PLATE_T + PILLAR_H, 'Pillar')
-        pil.bodies.item(0).name = 'WPtmp_Pillar'
-        _weld(NAME, ['WPtmp_railR', 'WPtmp_railL', 'WPtmp_Pillar'])
-
-        _circle(WALL_HOLE_R, -0.1, PLATE_T + PILLAR_H + 0.1, 'Hole', [_by(NAME)])
-        _circle(CBORE_R, -0.05, CBORE_D, 'Cbore', [_by(NAME)])
-
         # Park it clear of the track, below everything at min-Y.
         miny = 1e18; minx = 1e18
         for b in _all_bodies(root):
-            if b.name == NAME:
+            if b.name.startswith(NAME):
                 continue
             try:
                 bb = b.boundingBox
                 miny = min(miny, bb.minPoint.y); minx = min(minx, bb.minPoint.x)
             except Exception:
                 pass
-        if miny < 1e17:
+        if miny < 1e17 and _by(NAME) is not None:
             mtx = adsk.core.Matrix3D.create()
-            mtx.translation = adsk.core.Vector3D.create(
-                minx, miny - 3.0, 0.0)
+            mtx.translation = adsk.core.Vector3D.create(minx, miny - 3.0, 0.0)
             col = adsk.core.ObjectCollection.create(); col.add(_by(NAME))
             mi = root.features.moveFeatures.createInput2(col)
             mi.defineAsFreeMove(mtx)
@@ -3890,26 +3947,24 @@ def create_wall_plaque_part(root, params, ui=None):
 
         if ui:
             ui.messageBox(
-                'WallPlaque created (body "WallPlaque", parked below the track).\n\n'
-                f'  {RAIL_OUT*20:.0f} mm wide x {PLAQUE_LEN*10:.0f} mm long\n'
-                f'  pillar {PILLAR_H*10:.1f} mm -> {WALL_STANDOFF_GAP*10:.0f} mm '
-                f'from the wall tips to the wall\n'
-                f'  1 x M3 through the centre, head recessed on the track side\n\n'
-                'PRINT IT STANDING ON END (track axis vertical) — constant\n'
-                'cross-section, so no support and a flat bearing datum.\n\n'
-                'Assembly:\n'
-                '  1. Slide the plaque onto a junction\'s two studs along the\n'
-                '     track axis (or press it on — the 45° flare leads it in).\n'
-                '  2. With the loop assembled, mark through the plaque holes,\n'
-                '     drill, and anchor.\n'
-                '  3. Unclip, screw the plaques to the wall, slide the pieces\n'
-                '     back on.\n\n'
-                'Print one per junction — every plaque is identical.'
-            )
+                'Body "{}" created, parked below the track.\n\n'
+                '  {:.1f} mm dia x {:.1f} mm, into a {:.1f} mm counterbore\n'
+                '  ({:.2f} mm total clearance — press fit)\n\n'
+                'Print one per junction; they print flat, face down.\n\n'
+                'Install:\n'
+                '  1. Hold the assembled loop against the wall and mark\n'
+                '     through each bracket ear.\n'
+                '  2. Drill and anchor.\n'
+                '  3. Hang it back up and drive the screws — the ears are\n'
+                '     outboard of the track, so nothing is in the way and the\n'
+                '     mounts do NOT have to engage simultaneously.\n'
+                '  4. Press a cap into each counterbore to hide the head.'.format(
+                    NAME, CAP_R * 20, CBORE_D * 10, CBORE_R * 20,
+                    (CBORE_R - CAP_R) * 20))
         return True
     except:
         if ui:
-            ui.messageBox('Wall plaque part failed:\n' + traceback.format_exc())
+            ui.messageBox('Wall cap part failed:\n' + traceback.format_exc())
         return False
 
 

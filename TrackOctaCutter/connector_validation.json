@@ -1,5 +1,5 @@
 {
-  "written": "2026-08-04T13:36:15.712795",
+  "written": "2026-08-05T17:47:47.767913",
   "junctions": [
     {
       "joint_num": 1,
@@ -86,6 +86,11 @@
           "origin_err": 0.0,
           "female_ratio_sign": -1,
           "dr_lap": 0.005255
+        },
+        "floor": {
+          "tongue_ok": true,
+          "pocket_removed": 0.23404,
+          "error": null
         }
       },
       "volumes": {
@@ -128,7 +133,7 @@
           {
             "wall": "R",
             "method": "loft",
-            "pocket_removed": 0.20178,
+            "pocket_removed": 0.20177,
             "window_removed": 0.02678,
             "tongue_ok": true,
             "barb_ok": true,
@@ -147,7 +152,7 @@
           {
             "wall": "L",
             "method": "loft",
-            "pocket_removed": 0.21436,
+            "pocket_removed": 0.21437,
             "window_removed": 0.02803,
             "tongue_ok": true,
             "barb_ok": true,
@@ -170,9 +175,9 @@
           0.646
         ],
         "female_com": [
-          29.271,
-          -27.173,
-          0.648
+          29.203,
+          -27.192,
+          0.645
         ],
         "path_diag": {
           "have_path": true,
@@ -186,6 +191,11 @@
           "origin_err": 0.0,
           "female_ratio_sign": -1,
           "dr_lap": 0.005255
+        },
+        "floor": {
+          "tongue_ok": true,
+          "pocket_removed": 0.22655,
+          "error": null
         }
       },
       "volumes": {
@@ -270,9 +280,9 @@
           0.646
         ],
         "female_com": [
-          48.095,
-          -34.156,
-          0.648
+          48.044,
+          -34.107,
+          0.645
         ],
         "path_diag": {
           "have_path": true,
@@ -286,6 +296,11 @@
           "origin_err": 0.0,
           "female_ratio_sign": -1,
           "dr_lap": 0.005255
+        },
+        "floor": {
+          "tongue_ok": true,
+          "pocket_removed": 0.22663,
+          "error": null
         }
       },
       "volumes": {
@@ -370,9 +385,9 @@
           0.646
         ],
         "female_com": [
-          60.681,
-          -36.1,
-          0.648
+          60.654,
+          -36.131,
+          0.645
         ],
         "path_diag": {
           "have_path": true,
@@ -386,6 +401,11 @@
           "origin_err": 0.0,
           "female_ratio_sign": -1,
           "dr_lap": 0.005255
+        },
+        "floor": {
+          "tongue_ok": true,
+          "pocket_removed": 0.21572,
+          "error": null
         }
       },
       "volumes": {
@@ -470,9 +490,9 @@
           0.646
         ],
         "female_com": [
-          49.846,
-          -22.214,
-          0.648
+          49.888,
+          -22.255,
+          0.645
         ],
         "path_diag": {
           "have_path": true,
@@ -486,6 +506,11 @@
           "origin_err": 0.0,
           "female_ratio_sign": -1,
           "dr_lap": 0.005255
+        },
+        "floor": {
+          "tongue_ok": true,
+          "pocket_removed": 0.22667,
+          "error": null
         }
       },
       "volumes": {
@@ -570,9 +595,9 @@
           0.646
         ],
         "female_com": [
-          52.016,
-          -10.612,
-          0.648
+          51.959,
+          -10.644,
+          0.645
         ],
         "path_diag": {
           "have_path": true,
@@ -586,6 +611,11 @@
           "origin_err": 0.0,
           "female_ratio_sign": -1,
           "dr_lap": 0.005255
+        },
+        "floor": {
+          "tongue_ok": true,
+          "pocket_removed": 0.22849,
+          "error": null
         }
       },
       "volumes": {
@@ -670,9 +700,9 @@
           0.646
         ],
         "female_com": [
-          61.208,
-          -6.125,
-          0.648
+          61.209,
+          -6.15,
+          0.645
         ],
         "path_diag": {
           "have_path": true,
@@ -686,6 +716,11 @@
           "origin_err": 0.0,
           "female_ratio_sign": -1,
           "dr_lap": 0.005255
+        },
+        "floor": {
+          "tongue_ok": true,
+          "pocket_removed": 0.27294,
+          "error": null
         }
       },
       "volumes": {
@@ -770,9 +805,9 @@
           0.646
         ],
         "female_com": [
-          42.876,
-          -3.728,
-          0.648
+          42.942,
+          -3.719,
+          0.645
         ],
         "path_diag": {
           "have_path": true,
@@ -786,6 +821,11 @@
           "origin_err": 0.0,
           "female_ratio_sign": -1,
           "dr_lap": 0.005255
+        },
+        "floor": {
+          "tongue_ok": true,
+          "pocket_removed": 0.22656,
+          "error": null
         }
       },
       "volumes": {
@@ -865,14 +905,14 @@
           }
         ],
         "male_com": [
-          7.785,
-          -30.947,
-          0.641
+          7.747,
+          -30.95,
+          0.643
         ],
         "female_com": [
-          22.381,
-          -13.318,
-          0.648
+          22.444,
+          -13.283,
+          0.645
         ],
         "path_diag": {
           "have_path": true,
@@ -886,6 +926,11 @@
           "origin_err": 0.0,
           "female_ratio_sign": -1,
           "dr_lap": 0.005255
+        },
+        "floor": {
+          "tongue_ok": true,
+          "pocket_removed": 0.21472,
+          "error": null
         }
       },
       "volumes": {
